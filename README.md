@@ -4,8 +4,8 @@ A fast, free, open-source PDF and EPUB reader for Windows, written in Rust on th
 [MuPDF](https://mupdf.com) engine. Native GUI (egui) drawn on the CPU: no Electron, no web view,
 no GPU driver.
 
-**Status: early first version.** Viewing and page editing work; signing, OCR, translation and the
-AI assistant are planned (see [PLAN.md](PLAN.md)).
+**Status: early first version.** Viewing, page editing and comments work; signing, OCR, translation
+and the AI assistant are planned (see [PLAN.md](PLAN.md)).
 
 ## What works today
 
@@ -14,6 +14,10 @@ AI assistant are planned (see [PLAN.md](PLAN.md)).
 - Zoom (Ctrl + wheel, Ctrl +/-), fit width, fit page, go to page
 - **Rotate pages and save the rotation into the PDF**, delete pages, move pages, save / save as
 - **Combine PDFs**: add the pages of other PDF files at the end or after the current page (Pages menu)
+- **Comments that other PDF readers understand**: select text to highlight, underline or strike it out,
+  add sticky notes, edit or delete comments, and see them all in the Comments panel. They are saved as
+  standard PDF annotations, so Acrobat, Edge, Foxit, Preview and others show and edit them too
+- Select and copy text (drag, then Copy or Ctrl+C)
 - Text search with highlighted matches
 - Drag and drop, open from the command line (`rogeha-reader file.pdf`)
 - AI panel that starts a separate helper process only when you open it (the assistant itself is not implemented yet)

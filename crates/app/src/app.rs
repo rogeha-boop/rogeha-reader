@@ -12,6 +12,8 @@ use rogeha_core::{DocInfo, Event, HitQuad, PageImage, RenderKey, Request, Worker
 
 use crate::agent_host::AgentHost;
 
+mod comments;
+
 /// PDF points (1/72") to screen pixels at 100% zoom (96 dpi).
 const PT_TO_PX: f32 = 96.0 / 72.0;
 const PAGE_GAP: f32 = 10.0;
@@ -115,6 +117,7 @@ pub struct ReaderApp {
     pending_page: Option<usize>,
 
     search: Search,
+    comments: comments::Comments,
     ai: AiPanel,
     message: Option<(String, Instant, bool)>,
     after_save: AfterSave,
@@ -177,6 +180,7 @@ impl ReaderApp {
             pending_scroll: None,
             pending_page: None,
             search: Search::default(),
+            comments: comments::Comments::default(),
             ai: AiPanel::default(),
             message: None,
             after_save: AfterSave::Nothing,
@@ -434,7 +438,16 @@ impl ReaderApp {
                 Event::Doc(info) => {
                     let same_file = self.doc.as_ref().is_some_and(|d| d.path == info.path);
                     self.opening = false;
-                    self.textures.clear();
+                    // After an edit that keeps the page layout (a comment, a save), keep showing
+                    // the old page images until the new ones arrive, so nothing flashes white.
+                    let same_layout = same_file
+                        && self.doc.as_ref().is_some_and(|d| d.page_sizes == info.page_sizes);
+                    if !same_layout {
+                        self.textures.clear();
+                    }
+                    if !same_file {
+                        self.comments.reset_for_new_document();
+                    }
                     self.failed.clear();
                     self.last_want.clear();
                     if !same_file {
@@ -497,6 +510,29 @@ impl ReaderApp {
                     self.show_active_hit();
                 }
                 Event::PageText { .. } => {}
+                Event::Selection { page, seq, selection } => {
+                    if seq == self.comments.selection_seq {
+                        self.comments.selection = (!selection.quads.is_empty()).then_some(
+                            comments::Selection { page, quads: selection.quads, text: selection.text },
+                        );
+                    }
+                }
+                Event::Annotations { generation, list } => {
+                    if self.doc.as_ref().is_some_and(|d| d.generation == generation) {
+                        self.comments.list = list;
+                        if let Some(sel) = self.comments.selected {
+                            if !self.comments.list.iter().any(|a| (a.page, a.xref) == sel) {
+                                self.comments.selected = None;
+                            }
+                        }
+                        if let Some(key) = self.comments.open_when_listed.take() {
+                            self.comments.selected = Some(key);
+                        }
+                    }
+                }
+                Event::AnnotationAdded { page, xref } => {
+                    self.comments.open_when_listed = Some((page, xref));
+                }
                 Event::Closed => {
                     self.doc = None;
                     self.textures.clear();
@@ -613,6 +649,16 @@ impl ReaderApp {
 
         if self.search.open && hit(Modifiers::NONE, Key::Escape) {
             self.search.open = false;
+        }
+        if !ctx.egui_wants_keyboard_input() {
+            // Ctrl+C copies the selected page text.
+            if ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy))) {
+                self.copy_selection(ctx);
+            }
+            if hit(Modifiers::NONE, Key::Escape) {
+                self.comments.selection = None;
+                self.comments.note_tool = false;
+            }
         }
 
         // Plain keys only when no text field has focus.
@@ -790,6 +836,28 @@ impl ReaderApp {
                 .response
                 .on_disabled_hover_text(edit_hint);
             });
+
+            ui.separator();
+
+            if ui
+                .add_enabled(can_edit, egui::Button::new("Add note").selected(self.comments.note_tool))
+                .on_hover_text("Click, then click on the page where the note should go")
+                .on_disabled_hover_text(edit_hint)
+                .clicked()
+            {
+                self.comments.note_tool = !self.comments.note_tool;
+            }
+            let label = match self.comments.list.len() {
+                0 => "Comments".to_owned(),
+                n => format!("Comments ({n})"),
+            };
+            if ui
+                .add_enabled(has_doc, egui::Button::new(label).selected(self.comments.panel_open))
+                .on_hover_text("Show the list of comments")
+                .clicked()
+            {
+                self.comments.panel_open = !self.comments.panel_open;
+            }
 
             ui.separator();
 
@@ -1009,12 +1077,14 @@ impl ReaderApp {
         let scale = self.zoom * PT_TO_PX;
         let ppp = ui.ctx().pixels_per_point();
 
+        // Dragging with the mouse selects text; the wheel, scroll bars and touch scroll.
         let mut area = egui::ScrollArea::both().auto_shrink([false, false]);
         if let Some(offset) = self.pending_scroll.take() {
             area = area.scroll_offset(offset);
         }
 
         let mut visible: Vec<usize> = Vec::new();
+        let mut page_hits: Vec<(usize, Rect, egui::Response)> = Vec::new();
         let content_size = self.content_size;
         let out = area.show_viewport(ui, |ui, viewport| {
             let size = Vec2::new(content_size.x.max(viewport.width()), content_size.y);
@@ -1039,6 +1109,8 @@ impl ReaderApp {
                 let x = ((size.x - w) * 0.5).max(MARGIN);
                 let rect = Rect::from_min_size(origin + Vec2::new(x, top), Vec2::new(w, h));
                 visible.push(page);
+                let response = ui.interact(rect, ui.scope_id().with(("page", page)), Sense::click_and_drag());
+                page_hits.push((page, rect, response));
 
                 let image = self.textures.get(&page).map(|t| t.image.clone());
                 self.layer.pages.push((rect, image));
@@ -1077,6 +1149,17 @@ impl ReaderApp {
         self.current_page = current.min(n.saturating_sub(1));
         self.viewport_size = viewport_size;
         self.scroll_offset = out.state.clamped_offset();
+
+        // Comments: mouse handling and overlays. Ask for the comment list once the first
+        // page is on screen (so it never delays opening a document).
+        let ctx = ui.ctx().clone();
+        self.page_interactions(&ctx, &page_hits, scale);
+        self.comment_overlays(ui, &page_hits, scale);
+        if !self.comments.requested && !self.textures.is_empty() {
+            self.comments.requested = true;
+            self.worker.send(Request::ListAnnotations);
+        }
+        let Some(doc) = &self.doc else { return };
 
         // Ask the worker for what is visible (plus a little read-ahead).
         let zoom_settled = self.zoom_changed_at.is_none_or(|t| t.elapsed() >= ZOOM_SETTLE);
@@ -1170,6 +1253,33 @@ impl ReaderApp {
                         self.ai.send_now = true;
                     }
                     "save" => self.save(),
+                    // select=x0,y0,x1,y1 in page points on the current page
+                    "select" => {
+                        let v: Vec<f32> = arg.split(',').filter_map(|n| n.parse().ok()).collect();
+                        if let [x0, y0, x1, y1] = v[..] {
+                            self.comments.selection_seq += 1;
+                            self.worker.send(Request::SelectText {
+                                page: self.current_page,
+                                a: (x0, y0),
+                                b: (x1, y1),
+                                seq: self.comments.selection_seq,
+                            });
+                        }
+                    }
+                    "highlight" => self.mark_selection(rogeha_core::MarkupKind::Highlight),
+                    "underline" => self.mark_selection(rogeha_core::MarkupKind::Underline),
+                    "note" => self.worker.send(Request::AddNote {
+                        page: self.current_page,
+                        at: (120.0, 160.0),
+                        contents: arg.to_owned(),
+                        author: self.comments.author.clone(),
+                    }),
+                    "comments" => self.comments.panel_open = true,
+                    "opencomment" => {
+                        if let Some(a) = self.comments.list.last() {
+                            self.open_comment((a.page, a.xref), None);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1236,6 +1346,11 @@ impl ReaderApp {
             ui.add_space(3.0);
         });
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
+        if self.comments.panel_open && self.doc.is_some() {
+            egui::Panel::left("comments")
+                .default_size(280.0)
+                .show(ui, |ui| self.comments_panel(ui));
+        }
         if self.ai.open {
             egui::Panel::right("ai")
                 .default_size(320.0)
@@ -1259,6 +1374,7 @@ impl ReaderApp {
                 }
             });
 
+        self.comment_editor(&ctx);
         self.run_dev(&ctx);
         self.finish_bench(&ctx);
     }

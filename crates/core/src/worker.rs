@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 
+use crate::annotations::{AnnotInfo, MarkupKind, TextSelection};
 use crate::engine::{Engine, HitQuad, PageImage};
 
 /// Identifies one rendered image: which page, at which scale, for which document state.
@@ -40,6 +41,14 @@ pub enum Request {
     Save { target: Option<PathBuf> },
     Search { query: String },
     PageText { page: usize },
+    /// Text between two page points; answered with [`Event::Selection`] carrying `seq`.
+    SelectText { page: usize, a: (f32, f32), b: (f32, f32), seq: u64 },
+    /// Send the list of comments now, and again after every change.
+    ListAnnotations,
+    AddMarkup { page: usize, kind: MarkupKind, quads: Vec<HitQuad>, author: String, contents: String },
+    AddNote { page: usize, at: (f32, f32), contents: String, author: String },
+    EditAnnotation { page: usize, xref: i32, contents: String },
+    DeleteAnnotation { page: usize, xref: i32 },
     Close,
 }
 
@@ -52,6 +61,11 @@ pub enum Event {
     Saved(PathBuf),
     SearchResults { query: String, hits: Vec<(usize, HitQuad)> },
     PageText { page: usize, text: String },
+    Selection { page: usize, seq: u64, selection: TextSelection },
+    /// All comments in the document, for the given document generation.
+    Annotations { generation: u64, list: Vec<AnnotInfo> },
+    /// A comment was just created (so the GUI can select it).
+    AnnotationAdded { page: usize, xref: i32 },
     Closed,
     Error(String),
 }
@@ -85,6 +99,8 @@ struct State {
     engine: Option<Engine>,
     generation: u64,
     queue: Vec<RenderKey>,
+    /// The GUI asked for the comment list, so keep it up to date.
+    wants_annotations: bool,
 }
 
 fn run(rx: Receiver<Request>, etx: Sender<Event>, wake: impl Fn()) {
@@ -92,6 +108,7 @@ fn run(rx: Receiver<Request>, etx: Sender<Event>, wake: impl Fn()) {
         engine: None,
         generation: 0,
         queue: Vec::new(),
+        wants_annotations: false,
     };
     let emit = |e: Event| {
         let ok = etx.send(e).is_ok();
@@ -159,8 +176,18 @@ fn changed(st: &mut State, emit: &impl Fn(Event) -> bool) -> bool {
     st.generation += 1;
     st.queue.clear();
     match doc_info(st) {
-        Some(info) => emit(Event::Doc(info)),
+        Some(info) => emit(Event::Doc(info)) && send_annotations(st, emit),
         None => true,
+    }
+}
+
+fn send_annotations(st: &State, emit: &impl Fn(Event) -> bool) -> bool {
+    match &st.engine {
+        Some(engine) if st.wants_annotations => emit(Event::Annotations {
+            generation: st.generation,
+            list: engine.all_annotations(),
+        }),
+        _ => true,
     }
 }
 
@@ -237,6 +264,35 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
                 Ok(text) => emit(Event::PageText { page, text }),
                 Err(e) => emit(Event::Error(e)),
             }
+        }
+        Request::SelectText { page, a, b, seq } => {
+            let Some(engine) = &st.engine else { return true };
+            let selection = engine.select_text(page, a, b).unwrap_or_default();
+            emit(Event::Selection { page, seq, selection })
+        }
+        Request::ListAnnotations => {
+            st.wants_annotations = true;
+            send_annotations(st, emit)
+        }
+        Request::AddMarkup { page, kind, quads, author, contents } => {
+            let Some(engine) = st.engine.as_mut() else { return true };
+            match engine.add_markup(page, kind, &quads, &author, &contents) {
+                Ok(xref) => changed(st, emit) && emit(Event::AnnotationAdded { page, xref }),
+                Err(e) => emit(Event::Error(e)),
+            }
+        }
+        Request::AddNote { page, at, contents, author } => {
+            let Some(engine) = st.engine.as_mut() else { return true };
+            match engine.add_note(page, at, &contents, &author) {
+                Ok(xref) => changed(st, emit) && emit(Event::AnnotationAdded { page, xref }),
+                Err(e) => emit(Event::Error(e)),
+            }
+        }
+        Request::EditAnnotation { page, xref, contents } => {
+            edit!(|e: &mut Engine| e.set_annotation_contents(page, xref, &contents))
+        }
+        Request::DeleteAnnotation { page, xref } => {
+            edit!(|e: &mut Engine| e.delete_annotation(page, xref))
         }
         Request::Close => {
             st.engine = None;

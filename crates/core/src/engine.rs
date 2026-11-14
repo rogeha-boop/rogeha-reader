@@ -8,7 +8,7 @@ use mupdf::{Colorspace, Document, Matrix, TextPageFlags};
 
 pub type Result<T> = std::result::Result<T, String>;
 
-fn err<E: std::fmt::Display>(e: E) -> String {
+pub(crate) fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
@@ -192,7 +192,22 @@ impl Engine {
             .collect())
     }
 
-    fn pdf_mut(&mut self) -> Result<&mut PdfDocument> {
+    pub(crate) fn base(&self) -> &Document {
+        self.doc.base()
+    }
+
+    pub(crate) fn pdf(&self) -> Option<&PdfDocument> {
+        match &self.doc {
+            Doc::Pdf(d) => Some(d),
+            Doc::Other(_) => None,
+        }
+    }
+
+    pub(crate) fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    pub(crate) fn pdf_mut(&mut self) -> Result<&mut PdfDocument> {
         match &mut self.doc {
             Doc::Pdf(d) => Ok(d),
             Doc::Other(_) => Err("Page editing only works on PDF files".into()),

@@ -66,14 +66,19 @@ Done in the first version:
    Saves are incremental when possible (fast, keeps existing digital signatures valid); a full
    rewrite is used after deleting pages so the removed content is really gone.
 3. **Combine PDFs** (first cut): add the pages of other PDFs at the end or after the current page.
+4. **Comments** (first cut), stored only as standard PDF annotations so other readers can
+   read, edit and reply to them: select text to **highlight / underline / strike out**, add
+   **sticky notes**, edit or delete any comment (including ones made in other readers), a
+   Comments panel listing them all, text selection and copy. Each annotation gets the entries
+   other readers rely on: author (`T`), text (`Contents`), dates (`M`, `CreationDate`), unique
+   name (`NM`), colour, `QuadPoints`/`Rect`, an appearance stream, and a `Popup` for notes.
+   Checked with an independent PDF library (`crates/core/tests/check_annotations.py`).
 
 Planned, in this order:
 
-4. **Comments / annotations**, compatible with other readers: only standard PDF annotation types
-   (sticky note `Text`, `Highlight`, `Underline`, `StrikeOut`, `FreeText`, `Ink`, shapes), each
-   with a normal appearance stream, author, date and reply threads (`IRT`), written by MuPDF's
-   annotation API. Acrobat, Edge, Foxit, Preview, Okular etc. can read, edit and reply to them,
-   and Rogeha Reader shows theirs. No private formats or sidecar files.
+- **Comments, next steps**: reply threads (`IRT`), free-text boxes, freehand ink and shapes,
+  colour choice, moving notes, remembering your author name between sessions.
+
 5. **Page organizer**: thumbnail grid with drag-to-reorder, multi-select, rotate/delete,
    merge from several files, extract/split pages.
 6. **Compress scanned PDFs** without visible quality loss: re-encode page images with MuPDF's
@@ -113,7 +118,9 @@ Planned, in this order:
   outside the built-in fonts (CJK, Arabic, emoji...), fall back to the base-14 fonts or show
   missing glyphs. Fix: a small own font loader that reads `C:\Windows\Fonts` (mupdf-rs has a
   `FontLoader` hook), or bundle Noto/Droid fallback fonts.
-- Password-protected files are refused; no text selection/copy, outline/bookmarks sidebar,
+- Deleting a comment removes it from the document, but with a normal (incremental) save its
+  text can still be recovered from the file's older bytes, as in other PDF editors.
+- Password-protected files are refused; no outline/bookmarks sidebar,
   thumbnails, links, printing, or session restore yet.
 - Search runs over the whole document on the document thread, so rendering waits on very
   large files; above about 12 megapixels per page (very high zoom) the page is upscaled
