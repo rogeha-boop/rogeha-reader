@@ -26,4 +26,18 @@ fn main() {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
         .unwrap_or_else(|| "0".into());
     println!("cargo:rustc-env=ROGEHA_BUILD_NUMBER={count}");
+
+    // The icon and details Windows shows for the program file.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        println!("cargo:rerun-if-changed=../app/assets/rogeha-reader.ico");
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon("../app/assets/rogeha-reader.ico");
+        res.set("ProductName", "Rogeha Reader");
+        res.set("FileDescription", "Rogeha Reader Setup");
+        res.set("CompanyName", "Rogeha Studio");
+        res.set("LegalCopyright", "(c) 2026 Rogeha Studio. AGPL-3.0-or-later.");
+        if let Err(e) = res.compile() {
+            println!("cargo:warning=The program icon was not embedded: {e}");
+        }
+    }
 }

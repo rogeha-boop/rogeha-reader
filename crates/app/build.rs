@@ -25,4 +25,18 @@ fn main() {
         println!("cargo:rerun-if-changed={git_dir}/logs/HEAD");
         println!("cargo:rerun-if-changed={git_dir}/index");
     }
+
+    // The icon and details Windows shows for the program file.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        println!("cargo:rerun-if-changed=assets/rogeha-reader.ico");
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon("assets/rogeha-reader.ico");
+        res.set("ProductName", "Rogeha Reader");
+        res.set("FileDescription", "Rogeha Reader");
+        res.set("CompanyName", "Rogeha Studio");
+        res.set("LegalCopyright", "(c) 2026 Rogeha Studio. AGPL-3.0-or-later.");
+        if let Err(e) = res.compile() {
+            println!("cargo:warning=The program icon was not embedded: {e}");
+        }
+    }
 }
