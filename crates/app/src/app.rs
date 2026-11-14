@@ -862,14 +862,6 @@ impl ReaderApp {
             ui.separator();
 
             if ui
-                .add_enabled(can_edit, egui::Button::new("Add note").selected(self.comments.note_tool))
-                .on_hover_text("Click, then click on the page where the note should go")
-                .on_disabled_hover_text(edit_hint)
-                .clicked()
-            {
-                self.comments.note_tool = !self.comments.note_tool;
-            }
-            if ui
                 .add_enabled(can_edit, egui::Button::new("Sign").selected(self.sign.open || self.sign.placing.is_some()))
                 .on_hover_text("Add your signature to a page")
                 .on_disabled_hover_text(edit_hint)

@@ -419,6 +419,20 @@ impl ReaderApp {
         });
         if self.doc.as_ref().is_some_and(|d| !d.is_pdf) {
             ui.label(egui::RichText::new("Comments can be added to PDF files.").weak());
+        } else {
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add(egui::Button::new("Add note").selected(self.comments.note_tool))
+                    .on_hover_text("Click, then click on the page where the note should go")
+                    .clicked()
+                {
+                    self.comments.note_tool = !self.comments.note_tool;
+                }
+                if self.comments.note_tool {
+                    ui.label(egui::RichText::new("Now click on the page.").weak());
+                }
+            });
         }
         ui.separator();
 
