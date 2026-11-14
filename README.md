@@ -120,6 +120,16 @@ Rogeha Reader is licensed under the **GNU Affero General Public License v3.0 or 
 (see [LICENSE](LICENSE)), because it links MuPDF, which is AGPL-3.0. If you distribute a modified
 version, or run one as a network service, you must offer its complete source code under the same license.
 
+## How it is built, and what was tested
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): the parts of the reader, the two threads, the helper
+  processes, the assistant, what is stored where, and why it is built this way.
+- [`docs/TEST-REPORT.md`](docs/TEST-REPORT.md): the automated tests and their results for the current build,
+  what was checked by scripted runs, the measurements, and what has not been checked. `python
+  tools/test_report.py` runs the tests and rewrites it.
+
+Both are kept current with every build.
+
 ## Microsoft Store package
 
 `tools/package.ps1` builds the reader and packs it, with its assistant, into an MSIX in `artifacts/`:

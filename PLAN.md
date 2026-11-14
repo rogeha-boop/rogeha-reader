@@ -13,6 +13,9 @@ You can't ship a closed-source version without buying a MuPDF commercial license
 
 ## Architecture
 
+The current description is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). What follows is the plan it
+started from.
+
 ```
 rogeha-reader (workspace)
 ├── crates/core    rogeha-core: MuPDF wrapper, no GUI
