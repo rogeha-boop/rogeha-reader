@@ -103,35 +103,20 @@ Done in the first version:
    intact or changed, who signed, whether content was added afterwards, self-signed or not.
    Written in Rust (RSA from RustCrypto, a small DER reader/writer of our own, `p12-keystore`),
    without MuPDF's signing API. Cross-checked both ways with pyHanko.
+10. **Fill out forms**: click a text field to type in it (Tab goes to the next one), click
+    checkboxes and radio buttons to switch them, click a dropdown or list to choose. Fillable
+    fields are tinted. Values are stored as standard AcroForm values with regenerated
+    appearances through MuPDF's form API, radio groups are kept consistent by hand, and a
+    form's old XFA copy is dropped when filling starts so every reader shows the new values.
+    Tested on a hand-built form and on the IRS W-9; values read back with pypdf.
 
 Planned, in this order:
 
-- **Fill out PDF forms**: text fields, checkboxes, radio buttons, dropdowns and lists, typed
-  directly on the page and saved as standard AcroForm values with regenerated appearances
-  (so every reader shows them); tab order, required fields, and form calculations through
-  MuPDF's form API. XFA-only forms are out of scope.
+- **Forms, next steps**: typing a custom value into editable dropdowns, several selections
+  in a list box, showing a dropdown's display text instead of its stored value, date pickers
+  and field formatting hints, marking required fields that are still empty, flattening a
+  filled form, importing / exporting form data. XFA-only forms stay out of scope.
 
-- **Digital signatures, next steps**: checking the signer's certificate chain against the
-  Windows trust store and revocation, a visible signature box on the page, timestamps from a
-  timestamp authority (and long-term validation), elliptic-curve certificates, certificates
-  from the Windows certificate store or a smart card, and showing the signer's name when a
-  signature is broken.
-- **Signing, next steps**: a handwriting-style font for typed signatures, initials and date
-  stamps, signing several pages at once, better clean-up of photos taken in uneven light,
-  and protecting remembered signatures (they are stored unencrypted in the user profile).
-- **OCR, next steps**: text outside Windows-1252 (Cyrillic, Greek, CJK need an embedded
-  Unicode font for the layer), rotated and vertical text, automatic language detection,
-  OCR of just the current page for quick searching, deskewing crooked scans first.
-- **Design system, next steps**: an .ico in the exe (Explorer and taskbar pinning), the
-  toolbar as icons from the system's icon set, the depth-ramp for progress indicators.
-- **Compression, next steps**: JBIG2 for black-and-white scans, mixed raster content (text
-  layer in black-and-white over a low-resolution colour background) for the biggest savings
-  on text scans, and re-encoding images inside pages that currently have to be restored.
-- **Comments, next steps**: reply threads (`IRT`), free-text boxes, freehand ink and shapes,
-  colour choice, moving notes, remembering your author name between sessions.
-
-5. **Page organizer**: thumbnail grid with drag-to-reorder, multi-select, rotate/delete,
-   merge from several files, extract/split pages.
 10. **Translation**: offline via Bergamot / Firefox Translations models (Marian) in a helper
     process, models downloaded per language pair on demand; the AI agent is the optional
     higher-quality path.

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use mupdf::Size;
 use mupdf::pdf::PdfDocument;
-use rogeha_core::{Identity, SignOptions, SignatureStatus};
+use rogeha_core::{FieldKind, Identity, SignOptions, SignatureStatus};
 use rogeha_core::{AnnotKind, Engine, INK_BLUE, MarkupKind, Preset, SignatureArt, compress_pdf, load_signature_image, ocr_pdf};
 
 const A: (f32, f32) = (595.0, 842.0);
@@ -573,4 +573,120 @@ fn digital_signatures_sign_and_verify() {
     assert_eq!(engine.all_annotations().len(), 1, "the comment is still there");
     drop(engine);
     std::fs::remove_file(path).unwrap();
+}
+
+/// A one-page form: a text field, a checkbox, a group of two radio buttons and a dropdown.
+fn form_fixture(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join("rogeha-reader-tests");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{name}-{}.pdf", std::process::id()));
+    let mut doc = PdfDocument::new();
+    let page = doc.new_page(Size::A4).unwrap();
+    let page_ref = doc.find_page(0).unwrap().as_indirect().unwrap();
+    let add = |doc: &mut PdfDocument, src: &str| {
+        let obj = doc.new_object_from_str(src).unwrap();
+        doc.add_object(&obj).unwrap().as_indirect().unwrap()
+    };
+    // Appearances for the buttons: a filled square when on, nothing when off.
+    let look = |doc: &mut PdfDocument, content: &[u8]| {
+        let dict = doc.new_object_from_str("<< /Type /XObject /Subtype /Form /BBox [0 0 14 14] >>").unwrap();
+        doc.add_stream(&mupdf::Buffer::from_bytes(content).unwrap(), Some(&dict), false).unwrap().as_indirect().unwrap()
+    };
+    let (on, off) = (look(&mut doc, b"0 0 0.6 rg 2 2 10 10 re f"), look(&mut doc, b""));
+    let font = add(&mut doc, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+    let widget = format!("/Type /Annot /Subtype /Widget /F 4 /P {page_ref} 0 R");
+
+    let text = add(&mut doc, &format!("<< {widget} /FT /Tx /T (name) /TU (Your full name) /Ff 2 /Rect [72 700 300 720] /DA (/Helv 11 Tf 0 g) >>"));
+    let check = add(&mut doc, &format!("<< {widget} /FT /Btn /T (agree) /Rect [72 660 86 674] /V /Off /AS /Off /AP << /N << /Yes {on} 0 R /Off {off} 0 R >> >> >>"));
+    let group = add(&mut doc, "<< /FT /Btn /Ff 49152 /T (colour) /V /Off >>");
+    let radio = |doc: &mut PdfDocument, state: &str, x: i32| {
+        add(doc, &format!("<< {widget} /Parent {group} 0 R /Rect [{x} 620 {} 634] /AS /Off /AP << /N << /{state} {on} 0 R /Off {off} 0 R >> >> >>", x + 14))
+    };
+    let (red, blue) = (radio(&mut doc, "red", 72), radio(&mut doc, "blue", 100));
+    doc.xref_object(group).unwrap().unwrap().dict_put("Kids", doc.new_object_from_str(&format!("[{red} 0 R {blue} 0 R]")).unwrap()).unwrap();
+    let combo = add(&mut doc, &format!("<< {widget} /FT /Ch /Ff 131072 /T (country) /Rect [72 580 300 600] /DA (/Helv 11 Tf 0 g) /Opt [(Switzerland) (Germany) [(AT) (Austria)]] >>"));
+    let locked = add(&mut doc, &format!("<< {widget} /FT /Tx /T (office) /Ff 1 /Rect [72 540 300 560] /DA (/Helv 11 Tf 0 g) /V (do not fill) >>"));
+
+    let mut page_obj = page.object();
+    page_obj
+        .dict_put("Annots", doc.new_object_from_str(&format!("[{text} 0 R {check} 0 R {red} 0 R {blue} 0 R {combo} 0 R {locked} 0 R]")).unwrap())
+        .unwrap();
+    let form = doc
+        .new_object_from_str(&format!(
+            "<< /Fields [{text} 0 R {check} 0 R {group} 0 R {combo} 0 R {locked} 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv {font} 0 R >> >> >>"
+        ))
+        .unwrap();
+    doc.catalog().unwrap().dict_put("AcroForm", form).unwrap();
+    drop(page);
+    doc.save(path.to_str().unwrap()).unwrap();
+    path
+}
+
+#[test]
+fn forms_can_be_filled_and_saved() {
+    let path = form_fixture("form");
+    let mut engine = Engine::open(&path).unwrap();
+    let fields = engine.form_fields();
+    let find = |fields: &[rogeha_core::FormField], name: &str| fields.iter().filter(|f| f.name == name).cloned().collect::<Vec<_>>();
+    let kinds: Vec<_> = fields.iter().map(|f| (f.name.as_str(), f.kind)).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            ("name", FieldKind::Text { multiline: false, password: false }),
+            ("agree", FieldKind::CheckBox),
+            ("colour", FieldKind::Radio),
+            ("colour", FieldKind::Radio),
+            ("country", FieldKind::Dropdown),
+            ("office", FieldKind::Text { multiline: false, password: false }),
+        ]
+    );
+    let name = &find(&fields, "name")[0];
+    assert_eq!((name.label.as_str(), name.required, name.read_only), ("Your full name", true, false));
+    // The box is reported in display coordinates (top-left origin): 842 - 720 = 122.
+    assert_eq!((name.rect.0.round(), name.rect.1.round(), name.rect.3.round()), (72.0, 122.0, 142.0));
+    let country = &find(&fields, "country")[0];
+    assert_eq!(country.options, vec![("Switzerland".into(), "Switzerland".into()), ("Germany".into(), "Germany".into()), ("AT".into(), "Austria".into())]);
+    let (agree, radios, office) = (&find(&fields, "agree")[0], find(&fields, "colour"), &find(&fields, "office")[0]);
+    assert!(!agree.checked && office.read_only);
+
+    engine.set_field_value(0, name.xref, "Ada L\u{f6}velace").unwrap();
+    engine.set_field_checked(0, agree.xref, true).unwrap();
+    engine.set_field_checked(0, radios[0].xref, true).unwrap();
+    engine.set_field_checked(0, radios[1].xref, true).unwrap(); // choosing blue un-chooses red
+    engine.set_field_value(0, country.xref, "AT").unwrap();
+    assert!(engine.is_dirty());
+    // What cannot be done is refused.
+    assert!(engine.set_field_value(0, country.xref, "Atlantis").is_err());
+    assert!(engine.set_field_value(0, office.xref, "x").is_err(), "read-only field");
+    assert!(engine.set_field_checked(0, radios[1].xref, false).is_err());
+    assert!(engine.set_field_value(0, agree.xref, "text").is_err());
+    assert!(engine.set_field_value(0, 99999, "x").is_err());
+
+    // The typed text is drawn on the page.
+    let img = engine.render(0, 2.0).unwrap();
+    let inked = (150..580).filter(|x| img.pixels[(132 * 2) * img.width + x] != 0x00FF_FFFF).count();
+    assert!(inked > 20, "text field shows its value ({inked} dark pixels)");
+
+    engine.save(None).unwrap();
+    let reopened = Engine::open(&path).unwrap();
+    let after = reopened.form_fields();
+    assert_eq!(find(&after, "name")[0].value, "Ada L\u{f6}velace");
+    assert!(find(&after, "agree")[0].checked);
+    let colours: Vec<bool> = find(&after, "colour").iter().map(|f| f.checked).collect();
+    assert_eq!(colours, vec![false, true]);
+    assert_eq!(find(&after, "country")[0].value, "AT");
+    assert_eq!(find(&after, "office")[0].value, "do not fill");
+
+    // Unticking works too, and a file without a form reports no fields.
+    let mut engine2 = reopened;
+    engine2.set_field_checked(0, find(&after, "agree")[0].xref, false).unwrap();
+    assert!(!find(&engine2.form_fields(), "agree")[0].checked);
+    drop((engine, engine2));
+    if let Some(dest) = std::env::var_os("ROGEHA_KEEP_FORM") {
+        std::fs::copy(&path, dest).unwrap();
+    }
+    std::fs::remove_file(path).unwrap();
+    let plain = text_fixture("no-form");
+    assert!(Engine::open(&plain).unwrap().form_fields().is_empty());
+    std::fs::remove_file(plain).unwrap();
 }

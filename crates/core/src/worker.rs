@@ -8,6 +8,7 @@ use std::thread;
 use crate::annotations::{AnnotInfo, MarkupKind, TextSelection};
 use crate::engine::{Engine, HitQuad, PageImage};
 use crate::dsig::{Identity, SignOptions, SignatureInfo};
+use crate::forms::FormField;
 use crate::signature::SignatureArt;
 
 /// Identifies one rendered image: which page, at which scale, for which document state.
@@ -53,6 +54,12 @@ pub enum Request {
     DeleteAnnotation { page: usize, xref: i32 },
     /// Stamp a visual signature; `rect` is (x0, y0, x1, y1) in displayed page points.
     StampSignature { page: usize, rect: (f32, f32, f32, f32), art: SignatureArt, ink: [u8; 3] },
+    /// Send the document's form fields now, and again after every change.
+    ListFields,
+    /// Type into a text field or choose a dropdown / list option.
+    SetField { page: usize, xref: i32, value: String },
+    /// Tick or clear a checkbox, or select a radio button.
+    SetChecked { page: usize, xref: i32, checked: bool },
     /// Digitally sign with a PKCS#12 identity and write to `target` (`None`: the opened file).
     SignDocument { target: Option<PathBuf>, p12: Vec<u8>, password: String, options: SignOptions },
     /// Send the document's digital signatures now, and again after every change.
@@ -74,6 +81,8 @@ pub enum Event {
     Annotations { generation: u64, list: Vec<AnnotInfo> },
     /// A comment was just created (so the GUI can select it).
     AnnotationAdded { page: usize, xref: i32 },
+    /// The document's form fields, for the given document generation.
+    Fields { generation: u64, list: Vec<FormField> },
     /// The document's digital signatures, checked, for the given document generation.
     Signatures { generation: u64, list: Vec<SignatureInfo> },
     /// The document was signed and written to this file.
@@ -114,6 +123,7 @@ struct State {
     /// The GUI asked for the comment list, so keep it up to date.
     wants_annotations: bool,
     wants_signatures: bool,
+    wants_fields: bool,
 }
 
 fn run(rx: Receiver<Request>, etx: Sender<Event>, wake: impl Fn()) {
@@ -123,6 +133,7 @@ fn run(rx: Receiver<Request>, etx: Sender<Event>, wake: impl Fn()) {
         queue: Vec::new(),
         wants_annotations: false,
         wants_signatures: false,
+        wants_fields: false,
     };
     let emit = |e: Event| {
         let ok = etx.send(e).is_ok();
@@ -190,8 +201,18 @@ fn changed(st: &mut State, emit: &impl Fn(Event) -> bool) -> bool {
     st.generation += 1;
     st.queue.clear();
     match doc_info(st) {
-        Some(info) => emit(Event::Doc(info)) && send_annotations(st, emit) && send_signatures(st, emit),
+        Some(info) => emit(Event::Doc(info)) && send_annotations(st, emit) && send_signatures(st, emit) && send_fields(st, emit),
         None => true,
+    }
+}
+
+fn send_fields(st: &State, emit: &impl Fn(Event) -> bool) -> bool {
+    match &st.engine {
+        Some(engine) if st.wants_fields => emit(Event::Fields {
+            generation: st.generation,
+            list: engine.form_fields(),
+        }),
+        _ => true,
     }
 }
 
@@ -320,6 +341,16 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
         }
         Request::StampSignature { page, rect, art, ink } => {
             edit!(|e: &mut Engine| e.stamp_signature(page, rect, &art, ink))
+        }
+        Request::ListFields => {
+            st.wants_fields = true;
+            send_fields(st, emit)
+        }
+        Request::SetField { page, xref, value } => {
+            edit!(|e: &mut Engine| e.set_field_value(page, xref, &value))
+        }
+        Request::SetChecked { page, xref, checked } => {
+            edit!(|e: &mut Engine| e.set_field_checked(page, xref, checked))
         }
         Request::ListSignatures => {
             st.wants_signatures = true;

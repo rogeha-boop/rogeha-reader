@@ -17,6 +17,7 @@ mod about;
 mod comments;
 mod compress;
 mod dsign;
+mod forms;
 mod ocr;
 mod sign;
 
@@ -129,6 +130,7 @@ pub struct ReaderApp {
     ocr: ocr::OcrUi,
     sign: sign::SignUi,
     digital: dsign::DigitalUi,
+    forms: forms::FormsUi,
     ai: AiPanel,
     message: Option<(String, Instant, bool)>,
     after_save: AfterSave,
@@ -198,6 +200,7 @@ impl ReaderApp {
             ocr: ocr::OcrUi::default(),
             sign: sign::SignUi::default(),
             digital: dsign::DigitalUi::default(),
+            forms: forms::FormsUi::default(),
             ai: AiPanel::default(),
             message: None,
             after_save: AfterSave::Nothing,
@@ -272,6 +275,7 @@ impl ReaderApp {
     }
 
     fn save(&mut self) {
+        self.commit_field_text();
         if self.is_dirty() {
             self.worker.send(Request::Save { target: None });
         }
@@ -465,6 +469,7 @@ impl ReaderApp {
                     if !same_file {
                         self.comments.reset_for_new_document();
                         self.digital.reset_for_new_document();
+                        self.forms.reset_for_new_document();
                     }
                     self.failed.clear();
                     self.last_want.clear();
@@ -546,6 +551,11 @@ impl ReaderApp {
                         if let Some(key) = self.comments.open_when_listed.take() {
                             self.comments.selected = Some(key);
                         }
+                    }
+                }
+                Event::Fields { generation, list } => {
+                    if self.doc.as_ref().is_some_and(|d| d.generation == generation) {
+                        self.set_form_fields(list);
                     }
                 }
                 Event::Signatures { generation, list } => {
@@ -1222,10 +1232,15 @@ impl ReaderApp {
         } else {
             self.page_interactions(&ctx, &page_hits, scale);
             self.comment_overlays(ui, &page_hits, scale);
+            self.forms_overlay(ui, &page_hits, scale);
         }
         if !self.comments.requested && !self.textures.is_empty() {
             self.comments.requested = true;
             self.worker.send(Request::ListAnnotations);
+        }
+        if !self.forms.requested && !self.textures.is_empty() {
+            self.forms.requested = true;
+            self.worker.send(Request::ListFields);
         }
         if !self.digital.requested && !self.textures.is_empty() {
             self.digital.requested = true;
@@ -1364,6 +1379,9 @@ impl ReaderApp {
                     }
                     "signapply" => self.apply_signature(),
                     "signatures" => self.digital.window_open = true,
+                    // fill=<part of field name>|<value>   editfield=<same> opens the editor instead
+                    "fill" => self.dev_fill(arg, false),
+                    "editfield" => self.dev_fill(arg, true),
                     "certtab" => self.dev_certificate_tab(),
                     "dsign" => self.dev_sign_digitally(arg),
                     "ocrdownload" => {

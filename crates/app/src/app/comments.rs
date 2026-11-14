@@ -130,15 +130,19 @@ impl ReaderApp {
                 let v = (pos - rect.min) / scale;
                 (v.x.clamp(0.0, pw), v.y.clamp(0.0, ph))
             };
+            let over_field = !self.comments.note_tool
+                && response.hover_pos().is_some_and(|pos| self.over_form_field(page, to_page(pos)));
             if response.hovered() {
                 ctx.set_cursor_icon(if self.comments.note_tool {
                     CursorIcon::Crosshair
+                } else if over_field {
+                    CursorIcon::PointingHand
                 } else {
                     CursorIcon::Text
                 });
             }
 
-            if response.drag_started() && !self.comments.note_tool {
+            if response.drag_started() && !self.comments.note_tool && !over_field {
                 if let Some(pos) = response.interact_pointer_pos() {
                     self.comments.drag = Some((page, to_page(pos)));
                     self.comments.last_drag_end = (f32::NAN, f32::NAN);
@@ -169,6 +173,10 @@ impl ReaderApp {
                 let Some(pos) = response.interact_pointer_pos() else { continue };
                 let p = to_page(pos);
                 self.comments.selection = None;
+                // Form fields come first: a click in one fills it in.
+                if !self.comments.note_tool && self.form_click(page, p) {
+                    continue;
+                }
                 if self.comments.note_tool {
                     self.comments.note_tool = false;
                     if is_pdf {
