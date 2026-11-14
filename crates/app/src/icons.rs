@@ -15,6 +15,8 @@ pub enum Icon {
     Save,
     SaveAs,
     Print,
+    Undo,
+    Redo,
     Outline,
     ZoomOut,
     ZoomIn,
@@ -127,6 +129,20 @@ fn draw(ui: &Ui, icon: Icon, centre: Pos2, ink: Color32) {
             line(&[(8.0, 4.0), (8.0, 9.0), (15.0, 9.0), (15.0, 4.0)]);
             line(&[(18.0, 15.0), (18.0, 21.0)]);
             line(&[(15.0, 18.0), (21.0, 18.0)]);
+        }
+        Icon::Undo | Icon::Redo => {
+            // A straight arrow that comes back out of a U-turn: pointing left for undo,
+            // right for redo. (The rotate icons are circles; these are deliberately not.)
+            let flip = |x: f32| if matches!(icon, Icon::Redo) { 24.0 - x } else { x };
+            line(&[(flip(8.5), 4.5), (flip(4.0), 9.0), (flip(8.5), 13.5)]);
+            let mut path = vec![at(flip(4.0), 9.0), at(flip(14.5), 9.0)];
+            // Half a circle of radius 5 around (14.5, 14), from its top round to its bottom.
+            path.extend((1..=12).map(|i| {
+                let angle = -PI / 2.0 + PI * i as f32 / 12.0;
+                at(flip(14.5 + 5.0 * angle.cos()), 14.0 + 5.0 * angle.sin())
+            }));
+            path.push(at(flip(9.5), 19.0));
+            painter.add(Shape::line(path, stroke));
         }
         Icon::Print => {
             // A printer: paper going in at the top, the body, the printed sheet coming out.

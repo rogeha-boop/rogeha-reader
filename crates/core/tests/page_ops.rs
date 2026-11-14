@@ -825,3 +825,54 @@ fn outline_and_links_lead_to_pages() {
     assert!(links.iter().any(|l| matches!(l.target, rogeha_core::LinkTarget::Url(_))));
     assert!(links.iter().all(|l| l.rect.2 > l.rect.0 && l.rect.3 > l.rect.1));
 }
+
+#[test]
+fn changes_can_be_undone_and_redone() {
+    let dir = std::env::temp_dir().join("rogeha-reader-tests");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("undo-{}.pdf", std::process::id()));
+    let mut doc = PdfDocument::new();
+    for i in 0..3 {
+        doc.new_page(Size::new(100.0 + 10.0 * i as f32, 200.0)).unwrap();
+    }
+    doc.save(path.to_str().unwrap()).unwrap();
+    drop(doc);
+
+    let mut engine = Engine::open(&path).unwrap();
+    assert!(!engine.can_undo() && !engine.can_redo());
+    engine.edit(|e| e.rotate_pages(&[0], 90)).unwrap();
+    engine.edit(|e| e.delete_pages(&[1])).unwrap();
+    let note = engine.edit(|e| e.add_note(0, (20.0, 20.0), "remember", "Tester", [255, 200, 0])).unwrap();
+    assert!(note > 0);
+    assert_eq!(engine.page_sizes(), &[(200.0, 100.0), (120.0, 200.0)]);
+    assert_eq!(engine.all_annotations().len(), 1);
+
+    engine.undo().unwrap(); // the note
+    assert!(engine.all_annotations().is_empty());
+    engine.undo().unwrap(); // the deleted page is back
+    assert_eq!(engine.page_sizes(), &[(200.0, 100.0), (110.0, 200.0), (120.0, 200.0)]);
+    engine.undo().unwrap(); // the rotation
+    assert_eq!(engine.page_sizes()[0], (100.0, 200.0));
+    assert!(!engine.can_undo() && engine.can_redo());
+    assert!(!engine.is_dirty(), "everything undone: nothing to save");
+    assert!(engine.undo().is_err());
+
+    engine.redo().unwrap();
+    engine.redo().unwrap();
+    assert_eq!(engine.page_sizes(), &[(200.0, 100.0), (120.0, 200.0)]);
+    assert!(engine.is_dirty() && engine.can_redo());
+    // A new change drops what could have been redone.
+    engine.edit(|e| e.rotate_pages(&[1], 90)).unwrap();
+    assert!(!engine.can_redo());
+    // A change that fails leaves no trace.
+    assert!(engine.edit(|e| e.delete_pages(&[9])).is_err());
+    assert_eq!(engine.page_count(), 2);
+
+    engine.save(None).unwrap();
+    assert!(!engine.can_undo(), "the history starts over after a save");
+    drop(engine);
+    let saved = Engine::open(&path).unwrap();
+    assert_eq!(saved.page_sizes(), &[(200.0, 100.0), (200.0, 120.0)]);
+    drop(saved);
+    std::fs::remove_file(path).unwrap();
+}

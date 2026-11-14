@@ -17,6 +17,10 @@ AI assistant work; offline translation is planned (see [PLAN.md](PLAN.md)).
 - **Outline** (table of contents) panel, **clickable links** with Back / Forward, **dark pages** for
   night reading, and **printing** through the system print dialog (comments, form entries and
   signatures are printed as shown)
+- **Undo and redo** (Ctrl+Z, Ctrl+Y) for page changes, comments, signatures and form entries;
+  the history starts over when the document is saved
+- **Translate** a selected passage or the current page with the assistant (Tools menu chooses
+  the language); AI answers cite pages as links
 - **Two-page view** (View menu): pairs starting at page 1, or with the cover alone on the right like a
   printed magazine (1, 2-3, 4-5, …); **full screen** with F11
 - **Rotate pages and save the rotation into the PDF**, delete pages, move pages, save / save as
@@ -66,6 +70,7 @@ The Rogeha Studio name, banner and app icon are the studio's brand and are not c
 | Ctrl+T / Ctrl+W | Open a file in a new tab / close the tab |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Alt+Left / Alt+Right | Back / forward after following a link or an outline entry |
+| Ctrl+Z / Ctrl+Y | Undo / redo |
 | F11 | Full screen on / off (Esc also leaves it) |
 | Left / Right | Previous / next page, or spread in two-page view |
 | Ctrl+F, Enter, F3 / Shift+F3 | Find, next / previous match |
@@ -108,3 +113,20 @@ prints it.
 Rogeha Reader is licensed under the **GNU Affero General Public License v3.0 or later**
 (see [LICENSE](LICENSE)), because it links MuPDF, which is AGPL-3.0. If you distribute a modified
 version, or run one as a network service, you must offer its complete source code under the same license.
+
+## Installer (Windows)
+
+```
+cargo build --release
+cargo build --release -p rogeha-setup
+```
+
+The second command makes `target/release/rogeha-reader-setup.exe`, one file that carries the
+reader and its assistant. It installs for the current user only (no administrator rights) into
+`%LOCALAPPDATA%\Programs\Rogeha Reader`, adds a Start menu shortcut, "Open with" for PDF, EPUB,
+CBZ, XPS, FB2 and MOBI, and an entry under Installed apps to remove it again.
+
+Windows does not let a program make itself the default viewer. The installer, and
+**Tools > Make Rogeha Reader the default PDF viewer** in the reader, open the Default apps page on
+the reader's entry; you confirm the choice there. The installer is not code-signed yet, so
+SmartScreen may ask before running it.

@@ -290,6 +290,7 @@ impl ReaderApp {
         let can_mark = self.can_edit();
         let mut action = None;
         let mut copy = false;
+        let mut translate = false;
         let mut comment = false;
         egui::Area::new(Id::unique("selection-bar"))
             .order(Order::Foreground)
@@ -319,11 +320,17 @@ impl ReaderApp {
                         if ui.button("Copy").on_hover_text("Copy the text (Ctrl+C)").clicked() {
                             copy = true;
                         }
+                        if ui.button("Translate").on_hover_text(format!("Translate this text into {} with the assistant", self.session.translate_to)).clicked() {
+                            translate = true;
+                        }
                     });
                 });
             });
         if copy {
             self.copy_selection(ui.ctx());
+        }
+        if translate {
+            self.translate(true);
         }
         if comment {
             // The selection stays visible while the comment is written; saving turns it

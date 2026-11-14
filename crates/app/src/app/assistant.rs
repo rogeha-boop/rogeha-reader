@@ -145,6 +145,18 @@ impl ReaderApp {
         context
     }
 
+    /// Open the assistant and ask it something, as soon as it is running.
+    pub(super) fn assistant_ask_when_ready(&mut self, text: String) {
+        self.assistant.open = true;
+        if self.assistant.busy {
+            self.info("The assistant is still answering the previous question");
+        } else if self.assistant.host.is_some() && self.assistant.status != "Starting…" {
+            self.assistant_ask(text);
+        } else {
+            self.assistant.queued = Some(text);
+        }
+    }
+
     pub(super) fn assistant_ask(&mut self, text: String) {
         if text.trim().is_empty() || self.assistant.busy || self.assistant.host.is_none() {
             return;
@@ -572,7 +584,8 @@ impl ReaderApp {
         });
 
         if let Some(page) = go_to {
-            self.go_to_page(page);
+            // A citation: Alt+Left comes back to where the reader was.
+            self.jump_to(page);
         }
         if let Some(question) = ask {
             self.assistant_ask(question);

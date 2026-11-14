@@ -797,6 +797,12 @@ impl ReaderApp {
             self.search.open = false;
         }
         if !ctx.egui_wants_keyboard_input() {
+            if hit(ctrl_shift, Key::Z) || hit(ctrl, Key::Y) {
+                self.worker.send(Request::Redo);
+            }
+            if hit(ctrl, Key::Z) {
+                self.worker.send(Request::Undo);
+            }
             // Ctrl+C copies the selected page text.
             if ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy))) {
                 self.copy_selection(ctx);
@@ -961,6 +967,24 @@ impl ReaderApp {
 
             ui.separator();
 
+            let (can_undo, can_redo) = self.doc.as_ref().map_or((false, false), |d| (d.can_undo, d.can_redo));
+            if icons::icon_button(ui, Icon::Undo, false, can_undo)
+                .on_hover_text("Undo the last change (Ctrl+Z)")
+                .on_disabled_hover_text("Undo (nothing to undo)")
+                .clicked()
+            {
+                self.worker.send(Request::Undo);
+            }
+            if icons::icon_button(ui, Icon::Redo, false, can_redo)
+                .on_hover_text("Redo (Ctrl+Y)")
+                .on_disabled_hover_text("Redo (nothing to redo)")
+                .clicked()
+            {
+                self.worker.send(Request::Redo);
+            }
+
+            ui.separator();
+
             let page = self.current_page;
             if icons::icon_button(ui, Icon::RotateLeft, false, can_edit)
                 .on_hover_text("Rotate this page left (Shift+R)")
@@ -1028,17 +1052,62 @@ impl ReaderApp {
             ui.separator();
 
             // Whole-document tools live in a menu (marked by the chevron).
-            let tools = icons::menu_button(ui, "Tools", can_edit)
-                .on_hover_text("Tools for the whole document")
-                .on_disabled_hover_text(edit_hint);
+            let tools = icons::menu_button(ui, "Tools", true).on_hover_text("Tools for the whole document, and settings");
             egui::Popup::menu(&tools).show(|ui| {
-                if ui.button("Recognize text (OCR)…").on_hover_text("Make a scanned PDF searchable").clicked() {
+                let pdf_only = if edit_hint.is_empty() { "Open a PDF first" } else { "Works on PDF files" };
+                if ui
+                    .add_enabled(can_edit, egui::Button::new("Recognize text (OCR)…"))
+                    .on_hover_text("Make a scanned PDF searchable")
+                    .on_disabled_hover_text(pdf_only)
+                    .clicked()
+                {
                     ui.close();
                     self.ocr.open = true;
                 }
-                if ui.button("Compress PDF…").on_hover_text("Make a smaller copy of a scanned PDF").clicked() {
+                if ui
+                    .add_enabled(can_edit, egui::Button::new("Compress PDF…"))
+                    .on_hover_text("Make a smaller copy of a scanned PDF")
+                    .on_disabled_hover_text(pdf_only)
+                    .clicked()
+                {
                     ui.close();
                     self.compress.open = true;
+                }
+                ui.separator();
+                let language = self.session.translate_to.clone();
+                if ui
+                    .add_enabled(has_doc, egui::Button::new(format!("Translate this page into {language}")))
+                    .on_hover_text("The assistant translates the page you are on. To translate a passage, select it and choose Translate.")
+                    .clicked()
+                {
+                    ui.close();
+                    self.translate(false);
+                }
+                ui.menu_button("Translate into", |ui| {
+                    let mut choice = language.clone();
+                    for name in Self::LANGUAGES {
+                        ui.radio_value(&mut choice, name.to_owned(), name);
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label("Other:");
+                        let mut typed = if Self::LANGUAGES.contains(&language.as_str()) { String::new() } else { language.clone() };
+                        if ui.add(egui::TextEdit::singleline(&mut typed).desired_width(110.0)).changed() && !typed.trim().is_empty() {
+                            choice = typed;
+                        }
+                    });
+                    self.set_translate_to(&choice);
+                });
+                ui.separator();
+                if ui
+                    .button("Make Rogeha Reader the default PDF viewer…")
+                    .on_hover_text("Registers the reader with Windows and opens the Default apps page, where you confirm the choice")
+                    .clicked()
+                {
+                    ui.close();
+                    match crate::install::make_default() {
+                        Ok(text) => self.info(text),
+                        Err(e) => self.error(e),
+                    }
                 }
             });
 
@@ -1486,6 +1555,11 @@ impl ReaderApp {
                     "comments" => self.comments.panel_open = true,
                     "pages" => self.pages.open = true,
                     "welcome" => {}
+                    "undo" => self.worker.send(Request::Undo),
+                    "redo" => self.worker.send(Request::Redo),
+                    "translatepage" => self.translate(false),
+                    "translatesel" => self.translate(true),
+                    "tools" => {}
                     "darkpages" => self.set_dark_pages(true),
                     "lightpages" => self.set_dark_pages(false),
                     "outline" => self.nav.outline_open = true,

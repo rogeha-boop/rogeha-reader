@@ -4,6 +4,7 @@
 mod agent_host;
 mod app;
 mod icons;
+mod install;
 mod runner;
 mod theme;
 
@@ -19,6 +20,10 @@ fn main() {
     if args.get(1).is_some_and(|a| a == "--version") {
         println!("Rogeha Reader {}", app::version_text());
         return;
+    }
+    // Install-related modes: --register, --unregister, --uninstall (see install.rs).
+    if let Some(code) = install::command_line(&args[1.min(args.len())..]) {
+        std::process::exit(code);
     }
     if args.get(1).is_some_and(|a| a == "--compress") {
         std::process::exit(compress_helper(&args[2..]));

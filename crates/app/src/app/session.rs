@@ -77,6 +77,8 @@ pub(super) struct Session {
     pub active: usize,
     /// Show pages light-on-dark.
     pub dark_pages: bool,
+    /// The language "Translate" translates into.
+    pub translate_to: String,
     /// "Save as" is writing the open document to this file; the tab follows it there.
     pub save_as_target: Option<PathBuf>,
     /// The tab to remove once the next document has arrived.
@@ -90,10 +92,13 @@ fn state_file() -> PathBuf {
 
 impl Session {
     pub fn load() -> Self {
-        let mut session = Self::default();
+        let mut session = Self { translate_to: "English".into(), ..Self::default() };
         let Ok(text) = std::fs::read_to_string(state_file()) else { return session };
         let Ok(v) = serde_json::from_str::<Value>(&text) else { return session };
         session.dark_pages = v.get("dark_pages").and_then(Value::as_bool).unwrap_or(false);
+        if let Some(language) = v.get("translate_to").and_then(Value::as_str).filter(|l| !l.trim().is_empty()) {
+            session.translate_to = language.to_owned();
+        }
         if let Some(list) = v.get("recent").and_then(Value::as_array) {
             session.recent = list.iter().filter_map(Place::from_json).take(MAX_RECENT).collect();
         }
@@ -104,6 +109,7 @@ impl Session {
     fn store(&self) {
         let v = json!({
             "dark_pages": self.dark_pages,
+            "translate_to": self.translate_to,
             "recent": self.recent.iter().map(Place::to_json).collect::<Vec<_>>(),
         });
         let dir = app_data_dir();
@@ -247,6 +253,32 @@ impl ReaderApp {
         }
         self.remember_place();
         self.worker.send(Request::Close);
+    }
+
+    /// Languages offered in the Tools menu; any other can be typed.
+    pub(super) const LANGUAGES: [&str; 8] = ["English", "German", "French", "Italian", "Spanish", "Portuguese", "Serbian", "Croatian"];
+
+    pub(super) fn set_translate_to(&mut self, language: &str) {
+        let language = language.trim();
+        if !language.is_empty() && language != self.session.translate_to {
+            self.session.translate_to = language.to_owned();
+            self.session.store();
+        }
+    }
+
+    /// Ask the assistant for a translation of the selected text, or of the current page.
+    pub(super) fn translate(&mut self, selection: bool) {
+        let language = self.session.translate_to.clone();
+        let question = if selection {
+            // The selected text travels with every question as context.
+            format!("Translate the selected text into {language}. Reply with the translation only.")
+        } else {
+            format!(
+                "Translate page {} into {language}. Reply with the translation only, keeping the paragraphs.",
+                self.current_page + 1
+            )
+        };
+        self.assistant_ask_when_ready(question);
     }
 
     pub(super) fn set_dark_pages(&mut self, on: bool) {

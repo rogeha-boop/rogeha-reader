@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/app", "crates/agent"]
+members = ["crates/core", "crates/app", "crates/agent", "crates/setup"]
+# The installer packs the built reader, so it is built on request, after the others:
+#   cargo build --release && cargo build --release -p rogeha-setup
+default-members = ["crates/core", "crates/app", "crates/agent"]
 
 [workspace.package]
 version = "0.1.0"

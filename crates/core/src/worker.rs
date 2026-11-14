@@ -29,6 +29,9 @@ pub struct DocInfo {
     pub title: String,
     pub is_pdf: bool,
     pub dirty: bool,
+    /// There is a change to take back / to make again.
+    pub can_undo: bool,
+    pub can_redo: bool,
     pub generation: u64,
     /// Page sizes in points, rotation applied.
     pub page_sizes: Vec<(f32, f32)>,
@@ -43,6 +46,9 @@ pub enum Request {
     OpenWithPassword { path: PathBuf, password: String },
     /// The links on a page; answered with [`Event::Links`].
     Links { page: usize },
+    /// Take back the last change, or make it again. The history starts over after a save.
+    Undo,
+    Redo,
     /// Run a job with the open document; answered with [`Event::Done`] or [`Event::Error`].
     WithEngine(EngineJob),
     /// Replace the set of wanted renders. Listed first = most urgent.
@@ -222,6 +228,8 @@ fn doc_info(st: &State) -> Option<DocInfo> {
         title: e.title(),
         is_pdf: e.is_pdf(),
         dirty: e.is_dirty(),
+        can_undo: e.can_undo(),
+        can_redo: e.can_redo(),
         generation: st.generation,
         page_sizes: e.page_sizes().to_vec(),
     })
@@ -296,7 +304,7 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
                 return emit(Event::Error("No document is open".into()));
             };
             #[allow(clippy::redundant_closure_call)]
-            match ($f)(engine) {
+            match engine.edit($f) {
                 Ok(_) => changed(st, emit),
                 Err(e) => emit(Event::Error(e)),
             }
@@ -304,6 +312,15 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
     }
 
     match req {
+        Request::Undo | Request::Redo => {
+            let Some(engine) = st.engine.as_mut() else { return true };
+            let result = if matches!(req, Request::Redo) { engine.redo() } else { engine.undo() };
+            st.outline_for = None;
+            match result {
+                Ok(()) => changed(st, emit),
+                Err(e) => emit(Event::Error(e)),
+            }
+        }
         Request::Open(path) => open(st, path, None, emit),
         Request::OpenWithPassword { path, password } => open(st, path, Some(&password), emit),
         Request::Links { page } => match &st.engine {
@@ -391,14 +408,14 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
         }
         Request::AddMarkup { page, kind, quads, author, contents, color } => {
             let Some(engine) = st.engine.as_mut() else { return true };
-            match engine.add_markup(page, kind, &quads, &author, &contents, color) {
+            match engine.edit(|e| e.add_markup(page, kind, &quads, &author, &contents, color)) {
                 Ok(xref) => changed(st, emit) && emit(Event::AnnotationAdded { page, xref }),
                 Err(e) => emit(Event::Error(e)),
             }
         }
         Request::AddNote { page, at, contents, author, color } => {
             let Some(engine) = st.engine.as_mut() else { return true };
-            match engine.add_note(page, at, &contents, &author, color) {
+            match engine.edit(|e| e.add_note(page, at, &contents, &author, color)) {
                 Ok(xref) => changed(st, emit) && emit(Event::AnnotationAdded { page, xref }),
                 Err(e) => emit(Event::Error(e)),
             }

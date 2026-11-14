@@ -141,6 +141,8 @@ pub struct Engine {
     removed_content: bool,
     /// The password this document was opened with, kept to reopen the file after a save.
     password: Option<String>,
+    /// MuPDF's undo journal is on (it is switched on by the first [`Engine::edit`]).
+    journal: bool,
 }
 
 impl Engine {
@@ -177,6 +179,7 @@ impl Engine {
             dirty: false,
             removed_content: false,
             password: used,
+            journal: false,
         };
         engine.refresh_sizes()?;
         Ok(engine)
@@ -226,6 +229,91 @@ impl Engine {
     }
 
     /// Render a page at `scale` (1.0 = 72 dpi).
+    /// The raw MuPDF handle of an open PDF, for the few calls the safe wrapper lacks.
+    fn raw_pdf(&self) -> Option<*mut mupdf_sys::pdf_document> {
+        let Doc::Pdf(doc) = &self.doc else { return None };
+        const _: () = assert!(std::mem::size_of::<Document>() == std::mem::size_of::<*mut mupdf_sys::fz_document>());
+        let base: &Document = doc;
+        // SAFETY: `mupdf::Document` is a struct with a single `*mut fz_document` field (checked
+        // above), and the document is alive for as long as `self` is borrowed.
+        let pdf = unsafe {
+            let fz = *(base as *const Document as *const *mut mupdf_sys::fz_document);
+            mupdf_sys::pdf_document_from_fz_document(raw_context(), fz)
+        };
+        (!pdf.is_null()).then_some(pdf)
+    }
+
+    /// Make a change that can be undone: everything `change` does to the document becomes
+    /// one undo step. If it fails, whatever it had already changed is rolled back.
+    pub fn edit<T>(&mut self, change: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let Some(pdf) = self.raw_pdf() else { return change(self) };
+        // SAFETY: valid context and document; an operation is always closed below.
+        unsafe {
+            if !self.journal {
+                mupdf_sys::pdf_enable_journal(raw_context(), pdf);
+                self.journal = true;
+            }
+            mupdf_sys::pdf_begin_operation(raw_context(), pdf, c"Edit".as_ptr());
+        }
+        let result = change(self);
+        // The change may have replaced the document (it must not, but stay safe).
+        if let Some(pdf) = self.raw_pdf() {
+            // SAFETY: closes the operation opened above.
+            unsafe {
+                if result.is_ok() {
+                    mupdf_sys::pdf_end_operation(raw_context(), pdf);
+                } else {
+                    mupdf_sys::pdf_abandon_operation(raw_context(), pdf);
+                }
+            }
+        }
+        if result.is_err() {
+            let _ = self.refresh_sizes();
+        }
+        result
+    }
+
+    pub fn can_undo(&self) -> bool {
+        // SAFETY: valid context and document.
+        self.journal && self.raw_pdf().is_some_and(|pdf| unsafe { mupdf_sys::pdf_can_undo(raw_context(), pdf) != 0 })
+    }
+
+    pub fn can_redo(&self) -> bool {
+        // SAFETY: valid context and document.
+        self.journal && self.raw_pdf().is_some_and(|pdf| unsafe { mupdf_sys::pdf_can_redo(raw_context(), pdf) != 0 })
+    }
+
+    /// Take back the last change made through [`Engine::edit`].
+    pub fn undo(&mut self) -> Result<()> {
+        self.step_history(false)
+    }
+
+    /// Make the last undone change again.
+    pub fn redo(&mut self) -> Result<()> {
+        self.step_history(true)
+    }
+
+    fn step_history(&mut self, forward: bool) -> Result<()> {
+        let possible = if forward { self.can_redo() } else { self.can_undo() };
+        let Some(pdf) = self.raw_pdf().filter(|_| possible) else {
+            return Err(if forward { "Nothing to redo" } else { "Nothing to undo" }.into());
+        };
+        // SAFETY: valid context and document; we checked that the step exists, which is the
+        // only reason these calls fail.
+        let position = unsafe {
+            if forward {
+                mupdf_sys::pdf_redo(raw_context(), pdf);
+            } else {
+                mupdf_sys::pdf_undo(raw_context(), pdf);
+            }
+            let mut steps = 0;
+            mupdf_sys::pdf_undoredo_state(raw_context(), pdf, &mut steps)
+        };
+        // Back at the start of the history means back at what is in the file.
+        self.dirty = position > 0;
+        self.refresh_sizes()
+    }
+
     /// The outline (bookmarks, table of contents) as a flat list. Empty when there is none.
     pub fn outline(&self) -> Vec<OutlineItem> {
         fn walk(items: &[mupdf::Outline], level: usize, count: usize, out: &mut Vec<OutlineItem>) {
