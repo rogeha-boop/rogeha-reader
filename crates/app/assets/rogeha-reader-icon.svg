@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Rogeha Reader">
+  <!-- Rogeha Studio app icon rules: 128-unit tile, 28-unit radius, four 32-unit strata,
+       one white subject inside units 24-104 (an open book), and the 12-unit pip. -->
+  <defs><clipPath id="tile"><rect width="128" height="128" rx="28" ry="28"/></clipPath></defs>
+  <g clip-path="url(#tile)">
+    <rect y="0" width="128" height="32" fill="#3d6f9f"/>
+    <rect y="32" width="128" height="32" fill="#2f5c8a"/>
+    <rect y="64" width="128" height="32" fill="#26527c"/>
+    <rect y="96" width="128" height="32" fill="#1d4368"/>
+  </g>
+  <path d="M24 32 L64 42 L104 32 L104 94 L64 104 L24 94 Z" fill="#ffffff"/>
+  <rect x="58" y="62" width="12" height="12" fill="#26527c"/>
+</svg>

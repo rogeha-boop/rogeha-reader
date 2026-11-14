@@ -12,5 +12,5 @@ pub mod worker;
 
 pub use annotations::{AnnotInfo, AnnotKind, MarkupKind, TextSelection};
 pub use compress::{CompressStats, Preset, compress_pdf};
-pub use engine::{Engine, HitQuad, PageImage};
+pub use engine::{Engine, HitQuad, PageImage, render_svg};
 pub use worker::{DocInfo, Event, RenderKey, Request, Worker};

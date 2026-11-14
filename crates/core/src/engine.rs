@@ -64,6 +64,38 @@ impl PageImage {
     }
 }
 
+/// Render an SVG picture (for example a logo) to `width` pixels wide, keeping its shape.
+/// Transparent areas come out white.
+pub fn render_svg(svg: &[u8], width: usize) -> Result<PageImage> {
+    let doc = Document::from_bytes(svg, "svg").map_err(err)?;
+    let page = doc.load_page(0).map_err(err)?;
+    let bounds = page.bounds().map_err(err)?;
+    let scale = width as f32 / (bounds.x1 - bounds.x0).max(1.0);
+    let pix = page
+        .to_pixmap(&Matrix::new_scale(scale, scale), &Colorspace::device_rgb(), false, true)
+        .map_err(err)?;
+    pixmap_to_image(&pix)
+}
+
+fn pixmap_to_image(pix: &mupdf::Pixmap) -> Result<PageImage> {
+    let (w, h) = (pix.width() as usize, pix.height() as usize);
+    let n = pix.n() as usize;
+    let stride = pix.stride() as usize;
+    let samples = pix.samples();
+    if n < 3 || samples.len() < stride * h {
+        return Err("Unexpected pixmap format".into());
+    }
+    let mut pixels = Vec::with_capacity(w * h);
+    for y in 0..h {
+        let row = &samples[y * stride..y * stride + w * n];
+        pixels.extend(
+            row.chunks_exact(n)
+                .map(|p| (p[0] as u32) << 16 | (p[1] as u32) << 8 | p[2] as u32),
+        );
+    }
+    Ok(PageImage { width: w, height: h, pixels })
+}
+
 /// A search hit as a quad in page points: [ul, ur, ll, lr] as (x, y).
 pub type HitQuad = [(f32, f32); 4];
 
@@ -151,22 +183,7 @@ impl Engine {
         let pix = p
             .to_pixmap(&ctm, &Colorspace::device_rgb(), false, true)
             .map_err(err)?;
-        let (w, h) = (pix.width() as usize, pix.height() as usize);
-        let n = pix.n() as usize;
-        let stride = pix.stride() as usize;
-        let samples = pix.samples();
-        if n < 3 || samples.len() < stride * h {
-            return Err("Unexpected pixmap format".into());
-        }
-        let mut pixels = Vec::with_capacity(w * h);
-        for y in 0..h {
-            let row = &samples[y * stride..y * stride + w * n];
-            pixels.extend(
-                row.chunks_exact(n)
-                    .map(|p| (p[0] as u32) << 16 | (p[1] as u32) << 8 | p[2] as u32),
-            );
-        }
-        Ok(PageImage { width: w, height: h, pixels })
+        pixmap_to_image(&pix)
     }
 
     pub fn page_text(&self, page: usize) -> Result<String> {

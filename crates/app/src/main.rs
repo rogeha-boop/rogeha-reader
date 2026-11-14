@@ -4,6 +4,7 @@
 mod agent_host;
 mod app;
 mod runner;
+mod theme;
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -40,7 +41,14 @@ fn main() {
         .with_title("Rogeha Reader")
         .with_inner_size([1100.0, 820.0])
         .with_min_inner_size([420.0, 300.0])
-        .with_drag_and_drop(true);
+        .with_drag_and_drop(true)
+        // 64 x 64 RGBA, made from assets/rogeha-reader-icon.svg with
+        // `cargo run --release -p rogeha-core --example svg2rgba`.
+        .with_icon(egui::IconData {
+            rgba: include_bytes!("../assets/icon-64.rgba").to_vec(),
+            width: 64,
+            height: 64,
+        });
 
     let result = runner::run(viewport, move |ctx| {
         app::ReaderApp::new(ctx, file, started, bench, dev)

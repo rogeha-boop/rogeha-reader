@@ -24,6 +24,14 @@ and the AI assistant are planned (see [PLAN.md](PLAN.md)).
 - Drag and drop, open from the command line (`rogeha-reader file.pdf`)
 - AI panel that starts a separate helper process only when you open it (the assistant itself is not implemented yet)
 
+## Look
+
+The app follows the Rogeha Studio design system: its colour tokens in light and dark (it follows
+the Windows setting), IBM Plex Sans and Mono, and the Studio cover banner in the About window.
+The tokens live in `crates/app/src/theme.rs`; brand assets and fonts are in `crates/app/assets`
+(IBM Plex is under the SIL Open Font License, see `assets/fonts/OFL-ibm-plex.txt`).
+The Rogeha Studio name, banner and app icon are the studio's brand and are not covered by the AGPL.
+
 ## Keyboard
 
 | Keys | Action |

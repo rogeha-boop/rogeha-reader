@@ -11,7 +11,9 @@ use std::sync::Arc;
 use rogeha_core::{DocInfo, Event, HitQuad, PageImage, RenderKey, Request, Worker};
 
 use crate::agent_host::AgentHost;
+use crate::theme;
 
+mod about;
 mod comments;
 mod compress;
 
@@ -120,6 +122,7 @@ pub struct ReaderApp {
     search: Search,
     comments: comments::Comments,
     compress: compress::CompressUi,
+    about: about::About,
     ai: AiPanel,
     message: Option<(String, Instant, bool)>,
     after_save: AfterSave,
@@ -142,6 +145,7 @@ impl ReaderApp {
         let ctx = ctx.clone();
         // Ctrl +/- zooms the document, not the whole UI.
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        theme::apply(&ctx);
         let wake_ctx = ctx.clone();
         let worker = Worker::spawn(move || wake_ctx.request_repaint());
 
@@ -184,6 +188,7 @@ impl ReaderApp {
             search: Search::default(),
             comments: comments::Comments::default(),
             compress: compress::CompressUi::default(),
+            about: about::About::default(),
             ai: AiPanel::default(),
             message: None,
             after_save: AfterSave::Nothing,
@@ -880,6 +885,9 @@ impl ReaderApp {
             {
                 self.ai.open = !self.ai.open;
             }
+            if ui.button("About").on_hover_text("About Rogeha Reader").clicked() {
+                self.about.open = true;
+            }
         });
 
         if self.search.open {
@@ -1125,7 +1133,7 @@ impl ReaderApp {
                 painter.rect_stroke(
                     rect,
                     CornerRadius::ZERO,
-                    Stroke::new(1.0, Color32::from_gray(150)),
+                    Stroke::new(1.0, theme::tokens(ui.visuals().dark_mode).border),
                     StrokeKind::Outside,
                 );
 
@@ -1139,10 +1147,14 @@ impl ReaderApp {
                     let min = Vec2::new(xs.iter().copied().fold(f32::MAX, f32::min), ys.iter().copied().fold(f32::MAX, f32::min));
                     let max = Vec2::new(xs.iter().copied().fold(f32::MIN, f32::max), ys.iter().copied().fold(f32::MIN, f32::max));
                     let r = Rect::from_min_max(rect.min + min * scale, rect.min + max * scale);
+                    // The current match is the screen's one accent (signal-500); the others
+                    // are a quiet steel tint.
                     let color = if i == self.search.active {
-                        Color32::from_rgba_unmultiplied(255, 140, 0, 110)
+                        let c = theme::LIGHT.signal_500;
+                        Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 120)
                     } else {
-                        Color32::from_rgba_unmultiplied(255, 230, 0, 90)
+                        let c = theme::LIGHT.steel_500;
+                        Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 60)
                     };
                     painter.rect_filled(r, CornerRadius::ZERO, color);
                 }
@@ -1287,6 +1299,9 @@ impl ReaderApp {
                         author: self.comments.author.clone(),
                     }),
                     "comments" => self.comments.panel_open = true,
+                    "about" => self.about.open = true,
+                    "light" => ctx.set_theme(egui::Theme::Light),
+                    "dark" => ctx.set_theme(egui::Theme::Dark),
                     // compress=<output path>
                     "compress" => {
                         self.compress.open = true;
@@ -1374,11 +1389,9 @@ impl ReaderApp {
                 .show(ui, |ui| self.ai_panel(ui));
         }
         self.layer.pages.clear();
-        self.layer.background = if ui.visuals().dark_mode {
-            Color32::from_gray(48)
-        } else {
-            Color32::from_gray(200)
-        };
+        // The document sits on `canvas`, the design system's page ground.
+        let tokens = theme::tokens(ui.visuals().dark_mode);
+        self.layer.background = tokens.canvas;
         // No fill here: the runner paints the background and the pages under the UI.
         egui::CentralPanel::default()
             .frame(egui::Frame::new())
@@ -1393,6 +1406,7 @@ impl ReaderApp {
 
         self.comment_editor(&ctx);
         self.compress_window(&ctx);
+        self.about_window(&ctx);
         self.run_dev(&ctx);
         self.finish_bench(&ctx);
     }

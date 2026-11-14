@@ -80,9 +80,14 @@ Done in the first version:
    before and after, and pages that changed beyond their images get their original content
    back (MuPDF's rewriter damages text on some PDFs). Measured: 8.1 MB colour scan at 300 dpi
    to 0.96 MB on Balanced with no visible difference at 200% zoom.
+6. **Rogeha Studio design system**: colour tokens for light and dark, IBM Plex type, radii,
+   an app icon drawn to the icon rules (four strata, white open book, the pip), and an About
+   window with the Studio cover banner on `canvas`.
 
 Planned, in this order:
 
+- **Design system, next steps**: an .ico in the exe (Explorer and taskbar pinning), the
+  toolbar as icons from the system's icon set, the depth-ramp for progress indicators.
 - **Compression, next steps**: JBIG2 for black-and-white scans, mixed raster content (text
   layer in black-and-white over a low-resolution colour background) for the biggest savings
   on text scans, and re-encoding images inside pages that currently have to be restored.
