@@ -29,6 +29,7 @@ pub enum Icon {
     Comments,
     Find,
     Assistant,
+    Features,
     About,
 }
 
@@ -220,6 +221,13 @@ fn draw(ui: &Ui, icon: Icon, centre: Pos2, ink: Color32) {
             // Two four-point stars: the usual mark for an AI assistant.
             closed(&[(10.0, 4.0), (12.0, 11.0), (19.0, 13.0), (12.0, 15.0), (10.0, 22.0), (8.0, 15.0), (1.0, 13.0), (8.0, 11.0)]);
             closed(&[(19.0, 2.0), (20.0, 4.5), (22.5, 5.5), (20.0, 6.5), (19.0, 9.0), (18.0, 6.5), (15.5, 5.5), (18.0, 4.5)]);
+        }
+        Icon::Features => {
+            // Four cards, as on the feature overview page.
+            closed(&[(3.5, 3.5), (10.5, 3.5), (10.5, 10.5), (3.5, 10.5)]);
+            closed(&[(13.5, 3.5), (20.5, 3.5), (20.5, 10.5), (13.5, 10.5)]);
+            closed(&[(3.5, 13.5), (10.5, 13.5), (10.5, 20.5), (3.5, 20.5)]);
+            closed(&[(13.5, 13.5), (20.5, 13.5), (20.5, 20.5), (13.5, 20.5)]);
         }
         Icon::About => {
             // The design system's `info-circle.svg`.

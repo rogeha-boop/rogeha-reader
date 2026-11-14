@@ -1128,6 +1128,13 @@ impl ReaderApp {
             {
                 self.assistant.open = !self.assistant.open;
             }
+            // The only button that goes online by itself: it opens the studio's page in the browser.
+            if icons::icon_button(ui, Icon::Features, false, true)
+                .on_hover_text("Feature overview: what Rogeha Reader can do (opens rogehastudio.com in your browser)")
+                .clicked()
+            {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(about::FEATURES_URL));
+            }
             if icons::icon_button(ui, Icon::About, self.about.open, true).on_hover_text("About Rogeha Reader").clicked() {
                 self.about.open = true;
             }

@@ -12,6 +12,8 @@ const COPYRIGHT: &str = "© 2026 Rogeha Studio";
 const SUPPORT_EMAIL: &str = "support@rogehastudio.com";
 const SOURCE_URL: &str = "https://github.com/rogeha-boop/rogeha-reader";
 const LEGAL_URL: &str = "https://rogehastudio.com/legal.html";
+/// The page on the studio's website that shows what the reader can do.
+pub(super) const FEATURES_URL: &str = "https://rogehastudio.com/projects/rogeha-reader/";
 
 const BANNER_LIGHT: &[u8] = include_bytes!("../../assets/rogeha-studio-cover-light.svg");
 const BANNER_DARK: &[u8] = include_bytes!("../../assets/rogeha-studio-cover-dark.svg");
@@ -124,6 +126,7 @@ impl ReaderApp {
                 });
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 16.0;
+                    ui.hyperlink_to("Feature overview", FEATURES_URL);
                     ui.hyperlink_to("Source code", SOURCE_URL);
                     ui.hyperlink_to("Legal notice", LEGAL_URL);
                 });

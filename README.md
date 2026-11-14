@@ -116,6 +116,25 @@ Rogeha Reader is licensed under the **GNU Affero General Public License v3.0 or 
 (see [LICENSE](LICENSE)), because it links MuPDF, which is AGPL-3.0. If you distribute a modified
 version, or run one as a network service, you must offer its complete source code under the same license.
 
+## Microsoft Store package
+
+`tools/package.ps1` builds the reader and packs it, with its assistant, into an MSIX in `artifacts/`:
+
+```powershell
+./tools/package.ps1           # unsigned, for upload: the Store signs it
+./tools/package.ps1 -Sign     # "Rogeha Reader (test)", signed with the test certificate, installs next to the Store app
+```
+
+The manifest (`package/AppxManifest.xml`) declares the file types, so Windows offers the Store app for PDF and
+e-book files without the reader writing to the registry, and it names the Visual C++ runtime as a dependency,
+which the Store installs with the app. Everything Partner Center asks for is in
+[`package/store-listing.md`](package/store-listing.md): the texts, the screenshots (`package/store-screenshots`),
+the logos (`package/store-logos`) and the checks before uploading. The screenshots show the reader's own short
+tour, `package/store-shot-samples/rogeha-reader-tour.pdf`.
+
+The **Feature overview** button beside About opens the reader's page on rogehastudio.com in the browser. It is
+the only button that goes online by itself.
+
 ## Installer (Windows)
 
 ```

@@ -35,6 +35,7 @@ fn main() {
 
     let mut file: Option<PathBuf> = None;
     let mut bench = false;
+    let mut size = [1100.0, 820.0];
     let mut dev = app::DevOptions::default();
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
@@ -43,6 +44,14 @@ fn main() {
         } else if arg == "--screenshot" {
             // Developer option: save the window contents as a PPM image, then exit.
             dev.screenshot = args.next().map(PathBuf::from);
+        } else if arg == "--size" {
+            // Developer option: the window's size in points, as WIDTHxHEIGHT (for screenshots).
+            let given = args.next().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            if let Some((w, h)) = given.split_once('x') {
+                if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
+                    size = [w, h];
+                }
+            }
         } else if arg == "--script" {
             // Developer option: actions to run before the screenshot, e.g. "page=3;rotate;find=text;ai".
             dev.script = args.next().map(|s| s.to_string_lossy().into_owned());
@@ -53,7 +62,7 @@ fn main() {
 
     let viewport = egui::ViewportBuilder::default()
         .with_title("Rogeha Reader")
-        .with_inner_size([1100.0, 820.0])
+        .with_inner_size(size)
         .with_min_inner_size([420.0, 300.0])
         .with_drag_and_drop(true)
         // 64 x 64 RGBA, made from assets/rogeha-reader-icon.svg with

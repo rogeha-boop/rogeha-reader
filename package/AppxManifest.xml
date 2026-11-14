@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX manifest for Rogeha Reader. tools/package.ps1 replaces the $…$ fields.
+
+  Identity Name, Publisher and PublisherDisplayName must be exactly what Partner Center shows under
+  Product management > Product identity for "Rogeha Reader"; the Store only accepts a package that carries
+  these. The publisher is Rogeha Studio's (the same as Rogeha Capture's). The name is the one to reserve:
+  RogehaStudio.RogehaReader. If Partner Center gives the product another name, change $NAME$'s value in
+  tools/package.ps1.
+
+  A test package (package.ps1 -Sign) gets its own name and "(test)", so it installs next to the Store app
+  instead of replacing it.
+
+  The file types: Windows registers them from this manifest, so the Store app appears under "Open with" and
+  in Settings > Default apps without the reader writing anything to the registry itself.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+
+  <Identity
+    Name="$NAME$"
+    Publisher="CN=961E1179-772D-4F2C-9BC0-390262D24B36"
+    Version="$VERSION$"
+    ProcessorArchitecture="$ARCH$" />
+
+  <Properties>
+    <DisplayName>$DISPLAYNAME$</DisplayName>
+    <PublisherDisplayName>Rogeha Studio</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+    <!-- The Visual C++ runtime the reader and MuPDF are built against. The Store installs it with the app,
+         so the app starts on a fresh Windows without the Visual C++ Redistributable. -->
+    <PackageDependency Name="Microsoft.VCLibs.140.00.UWPDesktop" MinVersion="14.0.24217.0"
+      Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="RogehaReader" Executable="rogeha-reader.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="$DISPLAYNAME$"
+        Description="A fast, free reader for PDF and EPUB files: comments, signatures, forms, page editing and an optional AI assistant."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="pdf">
+            <uap:DisplayName>PDF document</uap:DisplayName>
+            <uap:Logo>Assets\Document44x44Logo.png</uap:Logo>
+            <uap:InfoTip>PDF document</uap:InfoTip>
+            <uap:SupportedFileTypes>
+              <uap:FileType ContentType="application/pdf">.pdf</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="ebook">
+            <uap:DisplayName>E-book</uap:DisplayName>
+            <uap:Logo>Assets\Document44x44Logo.png</uap:Logo>
+            <uap:InfoTip>E-book</uap:InfoTip>
+            <uap:SupportedFileTypes>
+              <uap:FileType ContentType="application/epub+zip">.epub</uap:FileType>
+              <uap:FileType>.fb2</uap:FileType>
+              <uap:FileType>.mobi</uap:FileType>
+              <uap:FileType>.cbz</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="xps">
+            <uap:DisplayName>XPS document</uap:DisplayName>
+            <uap:Logo>Assets\Document44x44Logo.png</uap:Logo>
+            <uap:InfoTip>XPS document</uap:InfoTip>
+            <uap:SupportedFileTypes>
+              <uap:FileType>.xps</uap:FileType>
+              <uap:FileType>.oxps</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- Only used by the optional assistant, with the user's own key, and by the Feature overview link. -->
+    <Capability Name="internetClient" />
+    <!-- Required for a desktop (Win32) app. Partner Center asks for a short justification. -->
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

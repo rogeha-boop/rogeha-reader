@@ -229,7 +229,35 @@ mod win {
     }
 
     /// Register this copy of the reader and open Windows' Default apps page on its entry.
+    /// The package family name when the reader runs from its Microsoft Store package.
+    /// Windows registers a packaged program's file types from the package itself, so the
+    /// reader must not write its own registry entries then.
+    fn store_package() -> Option<String> {
+        use windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
+        use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFamilyName;
+        let mut len = 0u32;
+        // SAFETY: the first call only asks for the length; the second fills a buffer of that length.
+        unsafe {
+            if GetCurrentPackageFamilyName(&mut len, std::ptr::null_mut()) != ERROR_INSUFFICIENT_BUFFER {
+                return None; // not packaged
+            }
+            let mut name = vec![0u16; len as usize];
+            if GetCurrentPackageFamilyName(&mut len, name.as_mut_ptr()) != ERROR_SUCCESS {
+                return None;
+            }
+            Some(String::from_utf16_lossy(&name).trim_end_matches('\0').to_owned())
+        }
+    }
+
     pub fn make_default() -> Result<String, String> {
+        if let Some(family) = store_package() {
+            // "RogehaReader" is the Application Id in package/AppxManifest.xml.
+            Command::new("explorer.exe")
+                .arg(format!("ms-settings:defaultapps?registeredAUMID={family}!RogehaReader"))
+                .spawn()
+                .map_err(|e| format!("Could not open the Default apps page: {e}"))?;
+            return Ok("Windows opened Default apps: choose Rogeha Reader for .pdf there".into());
+        }
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         // An installed copy keeps its Installed apps entry; a portable copy only registers.
         register(&exe, exe.with_file_name(INSTALL_MARKER).exists())?;

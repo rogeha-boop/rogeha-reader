@@ -3111,7 +3111,7 @@ dependencies = [
 
 [[package]]
 name = "rogeha-agent"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "keyring",
  "serde_json",
@@ -3120,7 +3120,7 @@ dependencies = [
 
 [[package]]
 name = "rogeha-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "mupdf",
  "mupdf-sys",
@@ -3132,7 +3132,7 @@ dependencies = [
 
 [[package]]
 name = "rogeha-reader"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "egui",
  "egui-winit",
@@ -3149,7 +3149,7 @@ dependencies = [
 
 [[package]]
 name = "rogeha-setup"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "windows-sys 0.59.0",
  "winresource",
