@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use mupdf::pdf::{PdfDocument, PdfPage, PdfWriteOptions};
+use mupdf::pdf::{InsertPdfOptions, InsertPosition, PdfDocument, PdfPage, PdfWriteOptions};
 use mupdf::{Colorspace, Document, Matrix, TextPageFlags};
 
 pub type Result<T> = std::result::Result<T, String>;
@@ -42,6 +42,9 @@ pub struct Engine {
     /// Page sizes in points (1/72 inch), with page rotation applied.
     sizes: Vec<(f32, f32)>,
     dirty: bool,
+    /// Set when content was removed: the next save rewrites the whole file so the removed
+    /// pages are really gone, instead of appending an update to the old bytes.
+    removed_content: bool,
 }
 
 impl Engine {
@@ -61,6 +64,7 @@ impl Engine {
             path: path.to_path_buf(),
             sizes: Vec::new(),
             dirty: false,
+            removed_content: false,
         };
         engine.refresh_sizes()?;
         Ok(engine)
@@ -201,6 +205,7 @@ impl Engine {
         let doc = self.pdf_mut()?;
         doc.delete_pages(unique).map_err(err)?;
         self.dirty = true;
+        self.removed_content = true;
         self.refresh_sizes()
     }
 
@@ -211,6 +216,39 @@ impl Engine {
         doc.move_page(from, to).map_err(err)?;
         self.dirty = true;
         self.refresh_sizes()
+    }
+
+    /// Merge: copy every page of another PDF into this one. `before = None` appends at the
+    /// end, `Some(i)` inserts before page `i`. Returns the number of pages added.
+    pub fn insert_pdf(&mut self, other: &Path, before: Option<usize>) -> Result<usize> {
+        if let Some(i) = before {
+            if i > self.sizes.len() {
+                return Err(format!("Page {} does not exist", i + 1));
+            }
+        }
+        let other_str = other.to_str().ok_or("File path is not valid Unicode")?;
+        let source = Document::open(other_str).map_err(err)?;
+        if !source.is_pdf() {
+            return Err("Only PDF files can be merged (for now)".into());
+        }
+        if source.needs_password().map_err(err)? {
+            return Err("That PDF is password protected".into());
+        }
+        let source = PdfDocument::try_from(source).map_err(err)?;
+        let added = source.page_count().map_err(err)?.max(0) as usize;
+        let at_end = before.is_none_or(|i| i >= self.sizes.len());
+        let options = InsertPdfOptions {
+            target: match before {
+                Some(i) if !at_end => InsertPosition::Before(i),
+                _ => InsertPosition::Append,
+            },
+            ..Default::default()
+        };
+        let doc = self.pdf_mut()?;
+        doc.insert_pdf(&source, options).map_err(err)?;
+        self.dirty = true;
+        self.refresh_sizes()?;
+        Ok(added)
     }
 
     /// Save changes. `target = None` overwrites the opened file.
@@ -227,12 +265,26 @@ impl Engine {
         let tmp = PathBuf::from(tmp);
         let tmp_str = tmp.to_str().ok_or("File path is not valid Unicode")?;
 
+        // Two ways to save:
+        // * Incremental: copy the original bytes and append only what changed. Fast, keeps the
+        //   file size, and keeps existing digital signatures valid.
+        // * Full rewrite: needed when pages were deleted (so their content is really removed)
+        //   or when the file can't be updated incrementally (e.g. it was repaired on open).
+        let incremental = !self.removed_content && doc.can_be_saved_incrementally();
         let mut opts = PdfWriteOptions::default();
-        // Drop objects that are no longer referenced (e.g. deleted pages).
-        opts.set_garbage_level(1);
-        if let Err(e) = doc.save_with_options(tmp_str, opts) {
+        let written = if incremental {
+            opts.set_incremental(true);
+            std::fs::copy(&self.path, &tmp)
+                .map_err(err)
+                .and_then(|_| doc.save_with_options(tmp_str, opts).map_err(err))
+        } else {
+            // Drop unreferenced objects and keep streams compressed.
+            opts.set_garbage_level(3).set_compress(true);
+            doc.save_with_options(tmp_str, opts).map_err(err)
+        };
+        if let Err(e) = written {
             let _ = std::fs::remove_file(&tmp);
-            return Err(err(e));
+            return Err(e);
         }
 
         // Release the old file handle before replacing the file (required on Windows).

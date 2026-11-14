@@ -12,6 +12,7 @@ AI assistant are planned (see [PLAN.md](PLAN.md)).
 - Continuous scrolling; pages render in a background thread, only the visible ones plus a little read-ahead
 - Zoom (Ctrl + wheel, Ctrl +/-), fit width, fit page, go to page
 - **Rotate pages and save the rotation into the PDF**, delete pages, move pages, save / save as
+- **Combine PDFs**: add the pages of other PDF files at the end or after the current page (Pages menu)
 - Text search with highlighted matches
 - Drag and drop, open from the command line (`rogeha-reader file.pdf`)
 - AI panel that starts a separate helper process only when you open it (the assistant itself is not implemented yet)

@@ -136,3 +136,26 @@ fn bad_input_is_an_error_not_a_crash() {
     drop(engine);
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn merge_pdfs() {
+    let path = fixture("merge-a");
+    let other = fixture("merge-b");
+    let mut engine = Engine::open(&path).unwrap();
+
+    // Append, then insert the same file again before page 2.
+    assert_eq!(engine.insert_pdf(&other, None).unwrap(), 3);
+    assert_eq!(sizes(&engine), vec![px(A), px(B), px(C), px(A), px(B), px(C)]);
+    engine.insert_pdf(&other, Some(1)).unwrap();
+    assert_eq!(engine.page_count(), 9);
+    assert_eq!(sizes(&engine)[..5], [px(A), px(A), px(B), px(C), px(B)]);
+
+    // The merged file must not depend on the source still existing.
+    std::fs::remove_file(&other).unwrap();
+    engine.save(None).unwrap();
+    let reopened = Engine::open(&path).unwrap();
+    assert_eq!(reopened.page_count(), 9);
+    assert!(reopened.render(8, 1.0).is_ok());
+    drop((engine, reopened));
+    std::fs::remove_file(path).unwrap();
+}

@@ -12,9 +12,17 @@ fn main() -> eframe::Result {
 
     let mut file: Option<PathBuf> = None;
     let mut bench = false;
-    for arg in std::env::args_os().skip(1) {
+    let mut dev = app::DevOptions::default();
+    let mut args = std::env::args_os().skip(1);
+    while let Some(arg) = args.next() {
         if arg == "--bench" {
             bench = true;
+        } else if arg == "--screenshot" {
+            // Developer option: save the window contents as a PPM image, then exit.
+            dev.screenshot = args.next().map(PathBuf::from);
+        } else if arg == "--script" {
+            // Developer option: actions to run before the screenshot, e.g. "page=3;rotate;find=text;ai".
+            dev.script = args.next().map(|s| s.to_string_lossy().into_owned());
         } else if file.is_none() {
             file = Some(PathBuf::from(arg));
         }
@@ -32,6 +40,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Rogeha Reader",
         options,
-        Box::new(move |cc| Ok(Box::new(app::ReaderApp::new(cc, file, started, bench)))),
+        Box::new(move |cc| Ok(Box::new(app::ReaderApp::new(cc, file, started, bench, dev)))),
     )
 }

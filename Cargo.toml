@@ -9,7 +9,7 @@ edition = "2024"
 license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
-mupdf = "0.8.0"
+mupdf = { version = "0.8.0", default-features = false, features = ["js", "xps", "svg", "cbz", "img", "html", "epub", "tesseract", "brotli", "docx-output", "base14-fonts"] }
 
 [profile.release]
 opt-level = 3

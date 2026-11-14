@@ -54,29 +54,68 @@ Why these choices:
 
 ## Milestones
 
-1. **Viewer**: open PDF/EPUB/CBZ/XPS/FB2/MOBI, render in a background thread, page cache,
-   scroll, zoom, page navigation, keyboard shortcuts, drag-and-drop, open from command line.
-2. **Page ops**: rotate pages (saved into the file), delete, move/reorder, save / save as.
-3. **Visual signature**: draw / type / load an image; place and resize on the page; stamp it
-   into a saved copy (`PdfPage::insert_image` / an image XObject in the page content).
-4. **Digital signature**: PKCS#7/CMS from .p12/PFX (or a new self-signed identity); signing through
+Done in the first version:
+
+1. **Viewer**: open PDF/EPUB/CBZ/XPS/FB2/MOBI, render in a background thread, texture cache,
+   scroll, zoom, fit width/page, page navigation, search, keyboard shortcuts, drag-and-drop.
+2. **Page ops**: rotate pages (saved into the file), delete, move, save / save as.
+   Saves are incremental when possible (fast, keeps existing digital signatures valid); a full
+   rewrite is used after deleting pages so the removed content is really gone.
+3. **Combine PDFs** (first cut): add the pages of other PDFs at the end or after the current page.
+
+Planned, in this order:
+
+4. **Comments / annotations**, compatible with other readers: only standard PDF annotation types
+   (sticky note `Text`, `Highlight`, `Underline`, `StrikeOut`, `FreeText`, `Ink`, shapes), each
+   with a normal appearance stream, author, date and reply threads (`IRT`), written by MuPDF's
+   annotation API. Acrobat, Edge, Foxit, Preview, Okular etc. can read, edit and reply to them,
+   and Rogeha Reader shows theirs. No private formats or sidecar files.
+5. **Page organizer**: thumbnail grid with drag-to-reorder, multi-select, rotate/delete,
+   merge from several files, extract/split pages.
+6. **Compress scanned PDFs** without visible quality loss: re-encode page images with MuPDF's
+   image rewriter (`pdf_rewrite_images`): downsample only above a target resolution (e.g. colour
+   and grey scans to 150-200 dpi, bicubic), JPEG at high quality for colour/grey, lossless
+   CCITT G4 / JBIG2-style for black-and-white pages, plus object-stream and garbage cleanup.
+   Presets ("High quality", "Balanced", "Small"), a before/after size preview, and always
+   written to a new file so the original scan is kept.
+7. **Visual signature**: draw / type / load an image; place and resize on the page; stamp it
+   into a saved copy (`PdfPage::insert_image`).
+8. **Digital signature**: PKCS#7/CMS from .p12/PFX (or a new self-signed identity); signing through
    MuPDF's `pdf_sign_signature` with a Rust-implemented `pdf_pkcs7_signer` (RustCrypto `cms`,
-   `p12`/`pkcs12`, `rsa`, `x509-cert`); verifying signatures on open (`pdf_check_digest` /
-   `pdf_check_certificate` with a Rust verifier).
-5. **OCR**: MuPDF's built-in Tesseract (`fz_new_ocr_device`), which is already compiled in.
+   `pkcs12`, `rsa`, `x509-cert`); verifying signatures on open with a Rust verifier.
+9. **OCR**: MuPDF's built-in Tesseract (`fz_new_ocr_device`), already compiled in.
    Language data (`eng.traineddata`, ...) is downloaded once on demand into the app data folder,
    so everything works offline after that. Text becomes searchable/selectable; optionally saved
    as an invisible text layer.
-6. **Translation**: offline via Bergamot / Firefox Translations models (Marian) in a helper process,
-   models downloaded per language pair on demand; the AI agent is the higher-quality optional path.
-7. **AI agent**: lazily spawned `rogeha-agent.exe`; summarize/explain/ask with page citations,
-   translate, multi-step actions through reader tools. The model is a setting: current Claude
-   IDs are `claude-fable-5-2`, `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5`
-   (re-check the list when this milestone is built). API keys go in the OS credential store,
-   not in a plain-text file.
+10. **Translation**: offline via Bergamot / Firefox Translations models (Marian) in a helper
+    process, models downloaded per language pair on demand; the AI agent is the optional
+    higher-quality path.
+11. **AI agent**: `rogeha-agent.exe` is already spawned lazily (stub). To do: summarize/explain/ask
+    with page citations, translate, multi-step actions through reader tools. The model is a
+    setting: current Claude IDs are `claude-fable-5-2`, `claude-opus-5-5`, `claude-sonnet-5-5`
+    and `claude-haiku-5-5` (re-check the list when this is built). Also OpenAI-compatible
+    endpoints and local models. API keys go in the OS credential store, not a plain-text file.
+
+## Known gaps in the first version
+
+- **Memory is not yet SumatraPDF-class.** Measured on a high-DPI screen: about 83 MB for an empty
+  window and 100-190 MB with a document. Most of it is the OpenGL driver plus page textures.
+  Options: render straight to a software surface (no GPU driver in the process), tile and
+  down-res off-screen pages, cap MuPDF's object store.
+- **System fonts are off.** mupdf-rs's `system-fonts` feature (font-kit) hangs on Windows when
+  opening EPUBs, so it is disabled. PDFs that don't embed their fonts, and EPUB text in scripts
+  outside the built-in fonts (CJK, Arabic, emoji...), fall back to the base-14 fonts or show
+  missing glyphs. Fix: a small own font loader that reads `C:\Windows\Fonts` (mupdf-rs has a
+  `FontLoader` hook), or bundle Noto/Droid fallback fonts.
+- Password-protected files are refused; no text selection/copy, outline/bookmarks sidebar,
+  thumbnails, links, printing, or session restore yet.
+- Search runs over the whole document on the document thread, so rendering waits on very
+  large files; very high zoom is limited by an 8192 px texture cap (needs tiling).
+- A full rewrite after deleting pages can make some files slightly larger (object streams are
+  unpacked); the compression milestone fixes this.
 
 ## Performance targets
 
-- Window visible and first page drawn in well under 0.5 s on a normal PDF.
+- Window visible and first page drawn in well under 0.5 s on a normal PDF (measured: 0.25-0.55 s).
 - Memory in the tens of MB for normal documents (page cache capped by bytes).
 - OCR, translation and AI never touch the startup path.

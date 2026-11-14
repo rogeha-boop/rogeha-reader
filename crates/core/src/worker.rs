@@ -35,6 +35,8 @@ pub enum Request {
     Rotate { pages: Vec<usize>, delta: i32 },
     Delete { pages: Vec<usize> },
     Move { from: usize, to: usize },
+    /// Merge other PDFs into the open one, in order. `before = None` appends.
+    InsertPdfs { paths: Vec<PathBuf>, before: Option<usize> },
     Save { target: Option<PathBuf> },
     Search { query: String },
     PageText { page: usize },
@@ -190,6 +192,16 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
         Request::Rotate { pages, delta } => edit!(|e: &mut Engine| e.rotate_pages(&pages, delta)),
         Request::Delete { pages } => edit!(|e: &mut Engine| e.delete_pages(&pages)),
         Request::Move { from, to } => edit!(|e: &mut Engine| e.move_page(from, to)),
+        Request::InsertPdfs { paths, before } => edit!(|e: &mut Engine| {
+            let mut at = before;
+            for path in &paths {
+                let added = e
+                    .insert_pdf(path, at)
+                    .map_err(|err| format!("{}: {err}", path.display()))?;
+                at = at.map(|i| i + added);
+            }
+            Ok::<(), String>(())
+        }),
         Request::Save { target } => {
             let Some(engine) = st.engine.as_mut() else {
                 return emit(Event::Error("No document is open".into()));

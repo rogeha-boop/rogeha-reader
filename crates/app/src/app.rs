@@ -15,7 +15,7 @@ const PT_TO_PX: f32 = 96.0 / 72.0;
 const PAGE_GAP: f32 = 10.0;
 const MARGIN: f32 = 12.0;
 /// Upper bound for page textures kept in memory.
-const TEXTURE_BUDGET: usize = 64 << 20;
+const TEXTURE_BUDGET: usize = 48 << 20;
 const MAX_TEXTURE_SIDE: f32 = 8192.0;
 const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 8.0;
@@ -53,6 +53,8 @@ struct AiPanel {
     log: Vec<(bool, String)>, // (from user, text)
     input: String,
     status: String,
+    /// Send the current input without waiting for a click (developer automation).
+    send_now: bool,
 }
 
 enum AfterSave {
@@ -61,7 +63,17 @@ enum AfterSave {
     Open(PathBuf),
 }
 
+/// Hidden developer options used for automated checks (see main.rs).
+#[derive(Default)]
+pub struct DevOptions {
+    pub screenshot: Option<PathBuf>,
+    pub script: Option<String>,
+}
+
 pub struct ReaderApp {
+    dev: DevOptions,
+    dev_steps: Vec<String>,
+    dev_wait: u32,
     worker: Worker,
     doc: Option<DocInfo>,
     opening: bool,
@@ -94,6 +106,7 @@ pub struct ReaderApp {
 
     started: Instant,
     bench: bool,
+    bench_frames: u32,
     first_page_ms: Option<f64>,
 }
 
@@ -103,6 +116,7 @@ impl ReaderApp {
         file: Option<PathBuf>,
         started: Instant,
         bench: bool,
+        dev: DevOptions,
     ) -> Self {
         let ctx = cc.egui_ctx.clone();
         // Ctrl +/- zooms the document, not the whole UI.
@@ -110,7 +124,19 @@ impl ReaderApp {
         let wake_ctx = ctx.clone();
         let worker = Worker::spawn(move || wake_ctx.request_repaint());
 
+        let dev_steps = dev
+            .script
+            .as_deref()
+            .unwrap_or_default()
+            .split(';')
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .rev()
+            .collect();
         let mut app = Self {
+            dev,
+            dev_steps,
+            dev_wait: 0,
             worker,
             doc: None,
             opening: false,
@@ -135,6 +161,7 @@ impl ReaderApp {
             allow_close: false,
             started,
             bench,
+            bench_frames: 0,
             first_page_ms: None,
         };
         if let Some(path) = file {
@@ -318,6 +345,25 @@ impl ReaderApp {
         };
         self.pending_page = Some(to);
         self.worker.send(Request::Move { from, to });
+    }
+
+    /// Merge: pick one or more PDFs and add their pages at the end, or after the current page.
+    fn add_pdfs(&mut self, after_current: bool) {
+        if !self.can_edit() {
+            return;
+        }
+        let picked = rfd::FileDialog::new()
+            .set_title("Choose PDFs to add (they are added in the order shown)")
+            .add_filter("PDF", &["pdf"])
+            .pick_files();
+        let Some(mut paths) = picked else { return };
+        if paths.is_empty() {
+            return;
+        }
+        paths.sort();
+        let before = after_current.then_some(self.current_page + 1);
+        self.pending_page = Some(before.unwrap_or(self.page_count()));
+        self.worker.send(Request::InsertPdfs { paths, before });
     }
 
     fn run_search(&mut self) {
@@ -715,6 +761,15 @@ impl ReaderApp {
                         ui.close();
                     }
                     ui.separator();
+                    if ui.button("Add PDFs at the end…").on_hover_text("Combine: append the pages of other PDF files").clicked() {
+                        ui.close();
+                        self.add_pdfs(false);
+                    }
+                    if ui.button("Insert PDFs after this page…").clicked() {
+                        ui.close();
+                        self.add_pdfs(true);
+                    }
+                    ui.separator();
                     if ui.add_enabled(n > 1, egui::Button::new("Delete this page")).clicked() {
                         self.delete_current();
                         ui.close();
@@ -784,7 +839,11 @@ impl ReaderApp {
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if let Some(doc) = &self.doc {
-                let kind = if doc.is_pdf { "PDF" } else { "Reflowable / other" };
+                let kind = doc
+                    .path
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_uppercase())
+                    .unwrap_or_else(|| "Document".into());
                 ui.label(format!("Page {} of {}", self.current_page + 1, doc.page_sizes.len()));
                 ui.separator();
                 ui.label(kind);
@@ -865,7 +924,8 @@ impl ReaderApp {
                     .hint_text("Ask about this document"),
             );
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-            if (ui.button("Send").clicked() || enter) && !self.ai.input.trim().is_empty() {
+            let send_now = std::mem::take(&mut self.ai.send_now);
+            if (ui.button("Send").clicked() || enter || send_now) && !self.ai.input.trim().is_empty() {
                 let text = std::mem::take(&mut self.ai.input);
                 let msg = serde_json::json!({
                     "type": "ask",
@@ -1017,7 +1077,7 @@ impl ReaderApp {
         }
         let mut pages = visible.clone();
         if let (Some(&first), Some(&last)) = (visible.first(), visible.last()) {
-            pages.extend([last + 1, last + 2].into_iter().filter(|&p| p < n));
+            pages.extend([last + 1].into_iter().filter(|&p| p < n));
             if first > 0 {
                 pages.push(first - 1);
             }
@@ -1064,14 +1124,76 @@ impl ReaderApp {
         });
     }
 
+    /// Developer automation: run scripted actions one at a time, then take a screenshot.
+    fn run_dev(&mut self, ctx: &egui::Context) {
+        if self.dev.screenshot.is_none() && self.dev_steps.is_empty() {
+            return;
+        }
+        ctx.request_repaint();
+        let idle = self.doc.is_some() && !self.opening && self.last_want.is_empty() && !self.search.busy;
+        if !idle {
+            self.dev_wait = 0;
+            return;
+        }
+        self.dev_wait += 1;
+        if self.dev_wait < 20 {
+            return; // let the UI settle between steps
+        }
+        self.dev_wait = 0;
+        match self.dev_steps.pop() {
+            Some(step) => {
+                let (name, arg) = step.split_once('=').unwrap_or((&step, ""));
+                match name {
+                    "page" => self.go_to_page(arg.parse::<usize>().unwrap_or(1).saturating_sub(1)),
+                    "rotate" => self.rotate(vec![self.current_page], 90),
+                    "zoom" => self.set_zoom(arg.parse().unwrap_or(1.0), Fit::Custom),
+                    "fitpage" => self.fit = Fit::Page,
+                    "find" => {
+                        self.search.open = true;
+                        self.search.query = arg.to_owned();
+                        self.run_search();
+                    }
+                    "ai" => self.ai.open = true,
+                    "ask" => {
+                        self.ai.open = true;
+                        self.ai.input = arg.to_owned();
+                        self.ai.send_now = true;
+                    }
+                    "save" => self.save(),
+                    _ => {}
+                }
+            }
+            None => {
+                if let Some(path) = self.dev.screenshot.take() {
+                    ctx.request_screenshot(move |image| {
+                        let mut out =
+                            format!("P6
+{} {}
+255
+", image.width(), image.height()).into_bytes();
+                        out.extend(image.pixels.iter().flat_map(|p| [p.r(), p.g(), p.b()]));
+                        let _ = std::fs::write(&path, out);
+                        std::process::exit(0);
+                    });
+                }
+            }
+        }
+    }
+
     fn finish_bench(&mut self, ctx: &egui::Context) {
         if !self.bench {
             return;
         }
-        let Some(first_ms) = self.first_page_ms else { return };
-        if !self.last_want.is_empty() {
-            return; // read-ahead still rendering
-        }
+        self.bench_frames += 1;
+        let first_ms = match self.first_page_ms {
+            Some(ms) if self.last_want.is_empty() => ms, // read-ahead finished too
+            // No file given: report the empty-window baseline after a few frames.
+            None if self.doc.is_none() && !self.opening && self.bench_frames > 5 => 0.0,
+            _ => {
+                ctx.request_repaint();
+                return;
+            }
+        };
         self.bench = false;
         let (working_set, private) = memory_usage();
         println!(
@@ -1118,6 +1240,7 @@ impl eframe::App for ReaderApp {
                 }
             });
 
+        self.run_dev(&ctx);
         self.finish_bench(&ctx);
     }
 }
