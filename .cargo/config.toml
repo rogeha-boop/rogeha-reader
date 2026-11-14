@@ -2,7 +2,7 @@
 [env]
 # bindgen needs libclang.dll. On this machine it comes from the `libclang` pip wheel
 # (pip install --user libclang). Set your own LIBCLANG_PATH in the environment to override.
-LIBCLANG_PATH = { value = "C:/Users/rogeh/AppData/Roaming/Python/Python312/site-packages/clang/native", force = false }
+# Example: LIBCLANG_PATH = { value = "C:/path/to/site-packages/clang/native", force = false }
 # See build-support/msvc_max_align.h (harmless on other platforms).
 # clang finds the header through CPATH, which cargo resolves relative to this repo.
 BINDGEN_EXTRA_CLANG_ARGS = { value = "-include msvc_max_align.h", force = false }
