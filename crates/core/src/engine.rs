@@ -30,7 +30,7 @@ impl Doc {
 ///
 /// The safe wrapper keeps the pointer private, so we read it out of its one-field
 /// `Context` struct. The compile-time check below fails if that struct ever changes size.
-fn raw_context() -> *mut mupdf_sys::fz_context {
+pub(crate) fn raw_context() -> *mut mupdf_sys::fz_context {
     const _: () = assert!(
         std::mem::size_of::<mupdf::Context>() == std::mem::size_of::<*mut mupdf_sys::fz_context>()
     );

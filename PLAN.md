@@ -73,20 +73,24 @@ Done in the first version:
    other readers rely on: author (`T`), text (`Contents`), dates (`M`, `CreationDate`), unique
    name (`NM`), colour, `QuadPoints`/`Rect`, an appearance stream, and a `Popup` for notes.
    Checked with an independent PDF library (`crates/core/tests/check_annotations.py`).
+5. **Compress scanned PDFs** (Pages menu): re-encodes page images with MuPDF's image rewriter
+   in a helper process and writes a new, tidied file. Three presets (300 / 200 / 144 dpi, JPEG
+   85 / 75 / 60); black-and-white images stay lossless (CCITT G4); an image is replaced only
+   if the result is smaller. Safety net: every page's text and vector content is fingerprinted
+   before and after, and pages that changed beyond their images get their original content
+   back (MuPDF's rewriter damages text on some PDFs). Measured: 8.1 MB colour scan at 300 dpi
+   to 0.96 MB on Balanced with no visible difference at 200% zoom.
 
 Planned, in this order:
 
+- **Compression, next steps**: JBIG2 for black-and-white scans, mixed raster content (text
+  layer in black-and-white over a low-resolution colour background) for the biggest savings
+  on text scans, and re-encoding images inside pages that currently have to be restored.
 - **Comments, next steps**: reply threads (`IRT`), free-text boxes, freehand ink and shapes,
   colour choice, moving notes, remembering your author name between sessions.
 
 5. **Page organizer**: thumbnail grid with drag-to-reorder, multi-select, rotate/delete,
    merge from several files, extract/split pages.
-6. **Compress scanned PDFs** without visible quality loss: re-encode page images with MuPDF's
-   image rewriter (`pdf_rewrite_images`): downsample only above a target resolution (e.g. colour
-   and grey scans to 150-200 dpi, bicubic), JPEG at high quality for colour/grey, lossless
-   CCITT G4 / JBIG2-style for black-and-white pages, plus object-stream and garbage cleanup.
-   Presets ("High quality", "Balanced", "Small"), a before/after size preview, and always
-   written to a new file so the original scan is kept.
 7. **Visual signature**: draw / type / load an image; place and resize on the page; stamp it
    into a saved copy (`PdfPage::insert_image`).
 8. **Digital signature**: PKCS#7/CMS from .p12/PFX (or a new self-signed identity); signing through

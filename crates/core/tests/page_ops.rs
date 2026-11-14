@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use mupdf::Size;
 use mupdf::pdf::PdfDocument;
-use rogeha_core::{AnnotKind, Engine, MarkupKind};
+use rogeha_core::{AnnotKind, Engine, MarkupKind, Preset, compress_pdf};
 
 const A: (f32, f32) = (595.0, 842.0);
 const B: (f32, f32) = (300.0, 400.0);
@@ -245,4 +245,78 @@ fn comments_need_a_pdf() {
     assert!(!engine.is_dirty());
     drop(engine);
     std::fs::remove_file(path).unwrap();
+}
+
+/// A "scan": one page that is a large, smooth, slightly noisy image stored without loss at
+/// about 400 dpi, with a line of real text on top.
+fn scan_fixture(name: &str) -> PathBuf {
+    use mupdf::pdf::{InsertImageOptions, PageImageSource};
+    let path = text_fixture(name);
+    let mut doc = PdfDocument::open(path.to_str().unwrap()).unwrap();
+    let (w, h) = (1600usize, 1200usize);
+    let mut pix = mupdf::Pixmap::new_with_w_h(&mupdf::Colorspace::device_rgb(), w as i32, h as i32, false).unwrap();
+    let stride = pix.stride() as usize;
+    let mut seed = 12345u32;
+    let data = pix.samples_mut();
+    for y in 0..h {
+        for x in 0..w {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            let noise = (seed >> 29) as usize; // 0..7
+            let i = y * stride + x * 3;
+            data[i] = (60 + x * 150 / w + noise) as u8;
+            data[i + 1] = (200 - y * 120 / h + noise) as u8;
+            data[i + 2] = (120 + (x + y) * 60 / (w + h) + noise) as u8;
+        }
+    }
+    let mut page = doc.load_pdf_page(0).unwrap();
+    // 1600 px across 288 pt (4 inches) = 400 dpi.
+    page.insert_image(&mut doc, mupdf::Rect::new(72.0, 200.0, 360.0, 416.0), PageImageSource::Pixmap(&pix), InsertImageOptions::default())
+        .unwrap();
+    drop(page);
+    let scan = path.with_extension("scan.pdf");
+    doc.save(scan.to_str().unwrap()).unwrap();
+    drop(doc);
+    std::fs::remove_file(path).unwrap();
+    scan
+}
+
+#[test]
+fn compressing_a_scan_shrinks_it_and_keeps_it_readable() {
+    let scan = scan_fixture("compress");
+    let out = scan.with_extension("small.pdf");
+    let stats = compress_pdf(&scan, &out, Preset::Balanced).unwrap();
+    assert_eq!(stats.pages, 1);
+    assert!(!stats.images_untouched);
+    assert!(
+        stats.bytes_after * 3 < stats.bytes_before,
+        "expected at least 3x smaller, got {} -> {}",
+        stats.bytes_before,
+        stats.bytes_after
+    );
+    assert!(stats.saved_percent() > 66.0);
+
+    // Same page, same text, and the picture still looks the same at screen resolution.
+    let (a, b) = (Engine::open(&scan).unwrap(), Engine::open(&out).unwrap());
+    assert_eq!(sizes(&a), sizes(&b));
+    let text = |e: &Engine| e.select_text(0, (70.0, 135.0), (400.0, 135.0)).unwrap().text;
+    assert_eq!(text(&b), "Hello annotated world");
+    assert_eq!(text(&a), text(&b));
+    let (ia, ib) = (a.render(0, 1.5).unwrap(), b.render(0, 1.5).unwrap());
+    let mut sum = 0f64;
+    for (p, q) in ia.pixels.iter().zip(&ib.pixels) {
+        for shift in [16, 8, 0] {
+            let d = ((p >> shift) & 255) as f64 - ((q >> shift) & 255) as f64;
+            sum += d * d;
+        }
+    }
+    let psnr = 10.0 * (255.0f64 * 255.0 / (sum / (ia.pixels.len() * 3) as f64).max(1e-9)).log10();
+    assert!(psnr > 38.0, "picture changed too much: {psnr:.1} dB");
+
+    // The original is untouched, no temporary files are left, and bad requests are refused.
+    assert_eq!(std::fs::metadata(&scan).unwrap().len(), stats.bytes_before);
+    assert!(!out.with_extension("pdf.rr-1").exists() && !out.with_extension("pdf.rr-2").exists());
+    assert!(compress_pdf(&scan, &scan, Preset::Balanced).is_err());
+    drop((a, b));
+    std::fs::remove_file(scan).unwrap();
+    std::fs::remove_file(out).unwrap();
 }

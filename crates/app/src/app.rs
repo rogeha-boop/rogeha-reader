@@ -13,6 +13,7 @@ use rogeha_core::{DocInfo, Event, HitQuad, PageImage, RenderKey, Request, Worker
 use crate::agent_host::AgentHost;
 
 mod comments;
+mod compress;
 
 /// PDF points (1/72") to screen pixels at 100% zoom (96 dpi).
 const PT_TO_PX: f32 = 96.0 / 72.0;
@@ -118,6 +119,7 @@ pub struct ReaderApp {
 
     search: Search,
     comments: comments::Comments,
+    compress: compress::CompressUi,
     ai: AiPanel,
     message: Option<(String, Instant, bool)>,
     after_save: AfterSave,
@@ -181,6 +183,7 @@ impl ReaderApp {
             pending_page: None,
             search: Search::default(),
             comments: comments::Comments::default(),
+            compress: compress::CompressUi::default(),
             ai: AiPanel::default(),
             message: None,
             after_save: AfterSave::Nothing,
@@ -828,6 +831,11 @@ impl ReaderApp {
                         self.add_pdfs(true);
                     }
                     ui.separator();
+                    if ui.button("Compress PDF…").on_hover_text("Make a smaller copy of a scanned PDF").clicked() {
+                        ui.close();
+                        self.compress.open = true;
+                    }
+                    ui.separator();
                     if ui.add_enabled(n > 1, egui::Button::new("Delete this page")).clicked() {
                         self.delete_current();
                         ui.close();
@@ -1223,7 +1231,11 @@ impl ReaderApp {
             return;
         }
         ctx.request_repaint();
-        let idle = self.doc.is_some() && !self.opening && self.last_want.is_empty() && !self.search.busy;
+        let idle = self.doc.is_some()
+            && !self.opening
+            && self.last_want.is_empty()
+            && !self.search.busy
+            && !self.compress_busy();
         if !idle {
             self.dev_wait = 0;
             return;
@@ -1275,6 +1287,11 @@ impl ReaderApp {
                         author: self.comments.author.clone(),
                     }),
                     "comments" => self.comments.panel_open = true,
+                    // compress=<output path>
+                    "compress" => {
+                        self.compress.open = true;
+                        self.start_compress(ctx, Some(PathBuf::from(arg)));
+                    }
                     "opencomment" => {
                         if let Some(a) = self.comments.list.last() {
                             self.open_comment((a.page, a.xref), None);
@@ -1375,6 +1392,7 @@ impl ReaderApp {
             });
 
         self.comment_editor(&ctx);
+        self.compress_window(&ctx);
         self.run_dev(&ctx);
         self.finish_bench(&ctx);
     }
