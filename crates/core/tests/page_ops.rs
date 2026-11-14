@@ -779,3 +779,49 @@ fn several_pages_move_together() {
     drop(engine);
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn a_protected_pdf_opens_only_with_its_password_and_stays_protected() {
+    use mupdf::pdf::{Encryption, PdfWriteOptions};
+    use rogeha_core::engine::{NEEDS_PASSWORD, WRONG_PASSWORD};
+    let dir = std::env::temp_dir().join("rogeha-reader-tests");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("locked-{}.pdf", std::process::id()));
+    let mut doc = PdfDocument::new();
+    doc.new_page(Size::new(200.0, 300.0)).unwrap();
+    doc.new_page(Size::new(200.0, 300.0)).unwrap();
+    let mut opts = PdfWriteOptions::default();
+    opts.set_encryption(Encryption::Aes256).set_user_password("open-me").set_owner_password("owner");
+    doc.save_with_options(path.to_str().unwrap(), opts).unwrap();
+    drop(doc);
+
+    assert_eq!(Engine::open(&path).err().unwrap(), NEEDS_PASSWORD);
+    assert_eq!(Engine::open_with(&path, Some("nope")).err().unwrap(), WRONG_PASSWORD);
+    let mut engine = Engine::open_with(&path, Some("open-me")).unwrap();
+    assert_eq!(engine.page_count(), 2);
+    engine.render(0, 0.5).unwrap();
+    // An edit and a save keep the document open, and the file protected.
+    engine.rotate_pages(&[0], 90).unwrap();
+    engine.save(None).unwrap();
+    assert_eq!(engine.page_sizes()[0], (300.0, 200.0));
+    drop(engine);
+    assert_eq!(Engine::open(&path).err().unwrap(), NEEDS_PASSWORD);
+    let again = Engine::open_with(&path, Some("open-me")).unwrap();
+    assert_eq!(again.page_sizes()[0], (300.0, 200.0));
+    drop(again);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn outline_and_links_lead_to_pages() {
+    // The test paper has a table of contents and citation links.
+    let Some(dir) = std::env::var_os("ROGEHA_TESTDATA") else { return };
+    let engine = Engine::open(&std::path::Path::new(&dir).join("paper.pdf")).unwrap();
+    let outline = engine.outline();
+    assert!(outline.len() > 3, "the paper has an outline");
+    assert!(outline.iter().all(|o| !o.title.is_empty()));
+    assert!(outline.iter().any(|o| o.page.is_some_and(|p| p > 0)));
+    let links = engine.links(0).unwrap();
+    assert!(links.iter().any(|l| matches!(l.target, rogeha_core::LinkTarget::Url(_))));
+    assert!(links.iter().all(|l| l.rect.2 > l.rect.0 && l.rect.3 > l.rect.1));
+}

@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 
 use crate::annotations::{AnnotInfo, MarkupKind, TextSelection};
-use crate::engine::{Engine, HitQuad, PageImage};
+use crate::engine::{Engine, HitQuad, NEEDS_PASSWORD, OutlineItem, PageImage, PageLink, WRONG_PASSWORD};
 use crate::dsig::{Identity, SignOptions, SignatureInfo};
 use crate::forms::FormField;
 use crate::signature::SignatureArt;
@@ -34,8 +34,17 @@ pub struct DocInfo {
     pub page_sizes: Vec<(f32, f32)>,
 }
 
+/// Work to run on the document thread with the open document (printing uses this).
+pub type EngineJob = Box<dyn FnOnce(&Engine) -> Result<String, String> + Send>;
+
 pub enum Request {
     Open(PathBuf),
+    /// Open a protected document with the password the user typed.
+    OpenWithPassword { path: PathBuf, password: String },
+    /// The links on a page; answered with [`Event::Links`].
+    Links { page: usize },
+    /// Run a job with the open document; answered with [`Event::Done`] or [`Event::Error`].
+    WithEngine(EngineJob),
     /// Replace the set of wanted renders. Listed first = most urgent.
     Want(Vec<RenderKey>),
     Rotate { pages: Vec<usize>, delta: i32 },
@@ -99,6 +108,13 @@ pub enum Event {
     /// The document was signed and written to this file.
     Signed(PathBuf),
     Closed,
+    /// The file needs a password; `wrong` when one was tried and did not fit.
+    PasswordNeeded { path: PathBuf, wrong: bool },
+    /// The document's outline; sent after opening and when pages were added, removed or moved.
+    Outline(Vec<OutlineItem>),
+    Links { generation: u64, page: usize, links: Vec<PageLink> },
+    /// A job finished; the text is for the status bar.
+    Done(String),
     Error(String),
 }
 
@@ -135,6 +151,8 @@ struct State {
     wants_annotations: bool,
     wants_signatures: bool,
     wants_fields: bool,
+    /// The outline was sent for this many pages; `None` sends it again.
+    outline_for: Option<usize>,
 }
 
 fn run(rx: Receiver<Request>, etx: Sender<Event>, wake: impl Fn()) {
@@ -145,6 +163,7 @@ fn run(rx: Receiver<Request>, etx: Sender<Event>, wake: impl Fn()) {
         wants_annotations: false,
         wants_signatures: false,
         wants_fields: false,
+        outline_for: None,
     };
     let emit = |e: Event| {
         let ok = etx.send(e).is_ok();
@@ -212,8 +231,30 @@ fn changed(st: &mut State, emit: &impl Fn(Event) -> bool) -> bool {
     st.generation += 1;
     st.queue.clear();
     match doc_info(st) {
-        Some(info) => emit(Event::Doc(info)) && send_annotations(st, emit) && send_signatures(st, emit) && send_fields(st, emit),
+        Some(info) => emit(Event::Doc(info)) && send_outline(st, emit) && send_annotations(st, emit) && send_signatures(st, emit) && send_fields(st, emit),
         None => true,
+    }
+}
+
+fn send_outline(st: &mut State, emit: &impl Fn(Event) -> bool) -> bool {
+    let Some(engine) = &st.engine else { return true };
+    if st.outline_for == Some(engine.page_count()) {
+        return true;
+    }
+    st.outline_for = Some(engine.page_count());
+    emit(Event::Outline(engine.outline()))
+}
+
+fn open(st: &mut State, path: PathBuf, password: Option<&str>, emit: &impl Fn(Event) -> bool) -> bool {
+    match Engine::open_with(&path, password) {
+        Ok(engine) => {
+            st.engine = Some(engine);
+            st.outline_for = None;
+            changed(st, emit)
+        }
+        Err(e) if e == NEEDS_PASSWORD => emit(Event::PasswordNeeded { path, wrong: false }),
+        Err(e) if e == WRONG_PASSWORD => emit(Event::PasswordNeeded { path, wrong: true }),
+        Err(e) => emit(Event::Error(format!("Could not open {}: {e}", path.display()))),
     }
 }
 
@@ -263,12 +304,23 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
     }
 
     match req {
-        Request::Open(path) => match Engine::open(&path) {
-            Ok(engine) => {
-                st.engine = Some(engine);
-                changed(st, emit)
-            }
-            Err(e) => emit(Event::Error(format!("Could not open {}: {e}", path.display()))),
+        Request::Open(path) => open(st, path, None, emit),
+        Request::OpenWithPassword { path, password } => open(st, path, Some(&password), emit),
+        Request::Links { page } => match &st.engine {
+            // A page whose links cannot be read simply has none.
+            Some(engine) => emit(Event::Links {
+                generation: st.generation,
+                page,
+                links: engine.links(page).unwrap_or_default(),
+            }),
+            None => true,
+        },
+        Request::WithEngine(job) => match &st.engine {
+            Some(engine) => match job(engine) {
+                Ok(text) => emit(Event::Done(text)),
+                Err(e) => emit(Event::Error(e)),
+            },
+            None => emit(Event::Error("No document is open".into())),
         },
         Request::Want(keys) => {
             st.queue = keys
@@ -279,8 +331,14 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
         }
         Request::Rotate { pages, delta } => edit!(|e: &mut Engine| e.rotate_pages(&pages, delta)),
         Request::Delete { pages } => edit!(|e: &mut Engine| e.delete_pages(&pages)),
-        Request::Move { from, to } => edit!(|e: &mut Engine| e.move_page(from, to)),
-        Request::Reorder { pages, before } => edit!(|e: &mut Engine| e.reorder_pages(&pages, before)),
+        Request::Move { from, to } => {
+            st.outline_for = None;
+            edit!(|e: &mut Engine| e.move_page(from, to))
+        }
+        Request::Reorder { pages, before } => {
+            st.outline_for = None;
+            edit!(|e: &mut Engine| e.reorder_pages(&pages, before))
+        }
         Request::InsertPdfs { paths, before } => edit!(|e: &mut Engine| {
             let mut at = before;
             for path in &paths {

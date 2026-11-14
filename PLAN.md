@@ -151,8 +151,12 @@ Planned, in this order:
   `FontLoader` hook), or bundle Noto/Droid fallback fonts.
 - Deleting a comment removes it from the document, but with a normal (incremental) save its
   text can still be recovered from the file's older bytes, as in other PDF editors.
-- Password-protected files are refused; no outline/bookmarks sidebar,
-  thumbnails, links, printing, or session restore yet.
+- Tabs are light: only the tab in front holds its document, so switching tabs reopens the file
+  (at the remembered page and zoom) and asks about unsaved changes first. Search results and
+  the assistant's conversation do not survive a tab switch.
+- Printing sends each page as a picture (up to 300 dpi), which is faithful but makes large
+  print jobs; it is Windows-only so far. Compress, OCR and digital signing do not yet work on
+  password-protected files, and dark pages also darken photos.
 - Search runs over the whole document on the document thread, so rendering waits on very
   large files; above about 12 megapixels per page (very high zoom) the page is upscaled
   instead of re-rendered (needs tile rendering).

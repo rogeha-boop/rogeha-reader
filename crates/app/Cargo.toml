@@ -15,3 +15,7 @@ softbuffer = "0.4"
 hdrshot-egui-backend = "0.2"
 rfd = "0.15"
 serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+# The print dialog and drawing pages on a printer.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_Controls_Dialogs"] }

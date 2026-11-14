@@ -96,6 +96,37 @@ fn pixmap_to_image(pix: &mupdf::Pixmap) -> Result<PageImage> {
     Ok(PageImage { width: w, height: h, pixels })
 }
 
+/// Error text when a document cannot be opened without a password.
+pub const NEEDS_PASSWORD: &str = "This document needs a password";
+/// Error text when the given password does not open the document.
+pub const WRONG_PASSWORD: &str = "That password does not open this document";
+
+/// One line of the document's outline (table of contents), flattened: `level` 0 is a
+/// top entry, 1 sits under the entry before it, and so on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OutlineItem {
+    pub title: String,
+    /// The page it leads to (0-based), if it leads to one.
+    pub page: Option<usize>,
+    pub level: usize,
+}
+
+/// Where a link on a page leads.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LinkTarget {
+    /// Another page of this document (0-based).
+    Page(usize),
+    /// A web or mail address, as written in the document.
+    Url(String),
+}
+
+/// A clickable area on a page, in page points: (x0, y0, x1, y1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PageLink {
+    pub rect: (f32, f32, f32, f32),
+    pub target: LinkTarget,
+}
+
 /// A search hit as a quad in page points: [ul, ur, ll, lr] as (x, y).
 pub type HitQuad = [(f32, f32); 4];
 
@@ -108,14 +139,31 @@ pub struct Engine {
     /// Set when content was removed: the next save rewrites the whole file so the removed
     /// pages are really gone, instead of appending an update to the old bytes.
     removed_content: bool,
+    /// The password this document was opened with, kept to reopen the file after a save.
+    password: Option<String>,
 }
 
 impl Engine {
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_with(path, None)
+    }
+
+    /// Open a document, with the password for a protected one. Without the right password
+    /// the error is [`NEEDS_PASSWORD`] or [`WRONG_PASSWORD`].
+    pub fn open_with(path: &Path, password: Option<&str>) -> Result<Self> {
         let path_str = path.to_str().ok_or("File path is not valid Unicode")?;
-        let doc = Document::open(path_str).map_err(err)?;
+        let mut doc = Document::open(path_str).map_err(err)?;
+        let mut used = None;
         if doc.needs_password().map_err(err)? {
-            return Err("This document is password protected (not supported yet)".into());
+            match password {
+                None => return Err(NEEDS_PASSWORD.into()),
+                Some(pw) => {
+                    if !doc.authenticate(pw).map_err(err)? {
+                        return Err(WRONG_PASSWORD.into());
+                    }
+                    used = Some(pw.to_owned());
+                }
+            }
         }
         let doc = if doc.is_pdf() {
             Doc::Pdf(PdfDocument::try_from(doc).map_err(err)?)
@@ -128,6 +176,7 @@ impl Engine {
             sizes: Vec::new(),
             dirty: false,
             removed_content: false,
+            password: used,
         };
         engine.refresh_sizes()?;
         Ok(engine)
@@ -177,6 +226,43 @@ impl Engine {
     }
 
     /// Render a page at `scale` (1.0 = 72 dpi).
+    /// The outline (bookmarks, table of contents) as a flat list. Empty when there is none.
+    pub fn outline(&self) -> Vec<OutlineItem> {
+        fn walk(items: &[mupdf::Outline], level: usize, count: usize, out: &mut Vec<OutlineItem>) {
+            for item in items {
+                let page = item.dest.map(|d| d.loc.page_number as usize).filter(|p| *p < count);
+                let title = item.title.split_whitespace().collect::<Vec<_>>().join(" ");
+                out.push(OutlineItem { title, page, level });
+                // A broken file can nest without end; stop at a sensible depth and size.
+                if level < 12 && out.len() < 20_000 {
+                    walk(&item.down, level + 1, count, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        if let Ok(items) = self.doc.base().outlines() {
+            walk(&items, 0, self.sizes.len(), &mut out);
+        }
+        out
+    }
+
+    /// The links on a page.
+    pub fn links(&self, page: usize) -> Result<Vec<PageLink>> {
+        let loaded = self.doc.base().load_page(page as i32).map_err(err)?;
+        let mut out = Vec::new();
+        for link in loaded.links().map_err(err)? {
+            let target = match link.dest {
+                Some(dest) if (dest.loc.page_number as usize) < self.sizes.len() => LinkTarget::Page(dest.loc.page_number as usize),
+                Some(_) => continue,
+                None if link.uri.is_empty() => continue,
+                None => LinkTarget::Url(link.uri),
+            };
+            let b = link.bounds;
+            out.push(PageLink { rect: (b.x0, b.y0, b.x1, b.y1), target });
+        }
+        Ok(out)
+    }
+
     pub fn render(&self, page: usize, scale: f32) -> Result<PageImage> {
         let p = self.doc.base().load_page(page as i32).map_err(err)?;
         let ctm = Matrix::new_scale(scale, scale);
@@ -413,7 +499,8 @@ impl Engine {
         self.doc = Doc::Pdf(PdfDocument::new());
         let swap = std::fs::rename(&tmp, &target);
         let reopen = if swap.is_ok() { &target } else { &self.path };
-        let reopened = Engine::open(reopen);
+        let password = self.password.clone();
+        let reopened = Engine::open_with(reopen, password.as_deref());
         if let Err(e) = swap {
             let _ = std::fs::remove_file(&tmp);
             if let Ok(old) = reopened {

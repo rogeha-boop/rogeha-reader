@@ -20,8 +20,11 @@ mod comments;
 mod compress;
 mod dsign;
 mod forms;
+mod navigate;
 mod ocr;
 mod pages_panel;
+mod print;
+mod session;
 mod sign;
 
 /// PDF points (1/72") to screen pixels at 100% zoom (96 dpi).
@@ -107,6 +110,8 @@ struct Search {
 enum AfterSave {
     Nothing,
     CloseApp,
+    /// Close the document and show the start screen.
+    CloseDoc,
     Open(PathBuf),
 }
 
@@ -165,6 +170,9 @@ pub struct ReaderApp {
     digital: dsign::DigitalUi,
     forms: forms::FormsUi,
     pages: pages_panel::PagesUi,
+    session: session::Session,
+    nav: navigate::Nav,
+    print_busy: bool,
     assistant: assistant::AssistantUi,
     message: Option<(String, Instant, bool)>,
     after_save: AfterSave,
@@ -242,6 +250,9 @@ impl ReaderApp {
             digital: dsign::DigitalUi::default(),
             forms: forms::FormsUi::default(),
             pages: pages_panel::PagesUi::default(),
+            session: session::Session::load(),
+            nav: navigate::Nav::default(),
+            print_busy: false,
             assistant: assistant::AssistantUi::default(),
             message: None,
             after_save: AfterSave::Nothing,
@@ -280,24 +291,30 @@ impl ReaderApp {
     }
 
     fn open_path(&mut self, path: PathBuf) {
+        self.remember_place();
         self.opening = true;
         self.worker.send(Request::Open(path));
     }
 
-    /// Open a file, asking first if there are unsaved changes.
-    fn request_open(&mut self, path: PathBuf) {
+    /// Open a file (in its own tab), asking first if there are unsaved changes.
+    /// Returns false when the user cancelled.
+    fn request_open(&mut self, path: PathBuf) -> bool {
+        if self.doc.as_ref().is_some_and(|d| d.path == path) {
+            return true; // already in front
+        }
         if self.is_dirty() {
             match ask_save_changes() {
                 rfd::MessageDialogResult::Yes => {
                     self.after_save = AfterSave::Open(path);
                     self.worker.send(Request::Save { target: None });
-                    return;
+                    return true;
                 }
                 rfd::MessageDialogResult::No => {}
-                _ => return,
+                _ => return false,
             }
         }
         self.open_path(path);
+        true
     }
 
     fn open_dialog(&mut self) {
@@ -335,6 +352,7 @@ impl ReaderApp {
             dialog = dialog.set_file_name(name.to_string_lossy());
         }
         if let Some(path) = dialog.save_file() {
+            self.session.save_as_target = Some(path.clone());
             self.worker.send(Request::Save { target: Some(path) });
         }
     }
@@ -476,6 +494,8 @@ impl ReaderApp {
             match event {
                 Event::Doc(info) => {
                     let same_file = self.doc.as_ref().is_some_and(|d| d.path == info.path);
+                    let previous = self.current_place();
+                    self.nav.links_changed();
                     self.opening = false;
                     // After an edit that keeps the page layout (a comment, a save), keep showing
                     // the old page images until the new ones arrive, so nothing flashes white.
@@ -491,6 +511,7 @@ impl ReaderApp {
                         self.comments.reset_for_new_document();
                         self.digital.reset_for_new_document();
                         self.forms.reset_for_new_document();
+                        self.nav.reset_for_new_document();
                     }
                     self.failed.clear();
                     self.last_want.clear();
@@ -512,6 +533,9 @@ impl ReaderApp {
                         });
                     }
                     self.doc = Some(info);
+                    if !same_file {
+                        self.document_arrived(previous);
+                    }
                     self.update_title(ctx);
                     self.assistant_edit_outcome(Ok(()));
                 }
@@ -523,6 +547,10 @@ impl ReaderApp {
                     if key.thumb {
                         self.thumbnail_arrived(ctx, key, image);
                         continue;
+                    }
+                    let mut image = image;
+                    if self.session.dark_pages {
+                        session::darken(&mut image.pixels);
                     }
                     self.textures.insert(key.page, PageTex { key, image: Arc::new(image) });
                     self.evict_textures();
@@ -541,6 +569,10 @@ impl ReaderApp {
                         AfterSave::CloseApp => {
                             self.allow_close = true;
                             ctx.send_viewport_cmd(ViewportCommand::Close);
+                        }
+                        AfterSave::CloseDoc => {
+                            self.remember_place();
+                            self.worker.send(Request::Close);
                         }
                         AfterSave::Open(next) => self.open_path(next),
                     }
@@ -600,8 +632,22 @@ impl ReaderApp {
                 Event::AnnotationAdded { page, xref } => {
                     self.comments.open_when_listed = Some((page, xref));
                 }
+                Event::PasswordNeeded { path, wrong } => self.ask_password(path, wrong),
+                Event::Outline(list) => self.nav.outline = list,
+                Event::Links { generation, page, links } => {
+                    if self.doc.as_ref().is_some_and(|d| d.generation == generation) {
+                        self.nav.links.insert(page, links);
+                    }
+                }
+                Event::Done(text) => {
+                    self.print_busy = false;
+                    self.info(text);
+                }
                 Event::Closed => {
                     self.doc = None;
+                    self.session.tabs.clear();
+                    self.session.active = 0;
+                    self.nav.reset_for_new_document();
                     self.textures.clear();
                     self.update_title(ctx);
                 }
@@ -610,6 +656,9 @@ impl ReaderApp {
                     self.digital.busy = false;
                     self.search.busy = false;
                     self.after_save = AfterSave::Nothing;
+                    self.print_busy = false;
+                    self.session.save_as_target = None;
+                    self.session.closing_tab = None;
                     self.assistant_edit_outcome(Err(&message));
                     self.error(message);
                 }
@@ -659,9 +708,19 @@ impl ReaderApp {
 
     fn handle_input(&mut self, ctx: &egui::Context) {
         // Files dropped on the window.
-        let dropped = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf()));
-        if let Some(path) = dropped {
+        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
+        // The first one opens; the others wait in tabs.
+        for extra in dropped.iter().skip(1) {
+            if !self.session.tabs.iter().any(|t| &t.path == extra) {
+                self.session.tabs.push(session::Place::new(extra));
+            }
+        }
+        if let Some(path) = dropped.into_iter().next() {
             self.request_open(path);
+        }
+
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.remember_place();
         }
 
         // Closing with unsaved changes.
@@ -690,8 +749,20 @@ impl ReaderApp {
         if hit(ctrl, Key::S) {
             self.save();
         }
-        if hit(ctrl, Key::O) {
+        if hit(ctrl, Key::O) || hit(ctrl, Key::T) {
             self.open_dialog();
+        }
+        if hit(ctrl, Key::P) {
+            self.print();
+        }
+        if hit(ctrl, Key::W) {
+            self.close_tab(self.session.active);
+        }
+        if hit(ctrl_shift, Key::Tab) {
+            self.next_tab(false);
+        }
+        if hit(ctrl, Key::Tab) {
+            self.next_tab(true);
         }
         if hit(ctrl, Key::F) {
             self.search.open = true;
@@ -753,6 +824,12 @@ impl ReaderApp {
         if hit(Modifiers::NONE, Key::ArrowUp) {
             self.scroll_by(-60.0);
         }
+        if hit(Modifiers::ALT, Key::ArrowLeft) {
+            self.go_back();
+        }
+        if hit(Modifiers::ALT, Key::ArrowRight) {
+            self.go_forward();
+        }
         if hit(Modifiers::NONE, Key::ArrowRight) {
             self.step_row(true);
         }
@@ -794,6 +871,19 @@ impl ReaderApp {
             if icons::icon_button(ui, Icon::Open, false, true).on_hover_text("Open a file (Ctrl+O)").clicked() {
                 self.open_dialog();
             }
+            let recent = icons::menu_button(ui, "", !self.session.recent.is_empty())
+                .on_hover_text("Recent files")
+                .on_disabled_hover_text("Recent files (none yet)");
+            let mut reopen = None;
+            egui::Popup::menu(&recent).show(|ui| {
+                reopen = self.recent_list(ui, 12);
+                if reopen.is_some() {
+                    ui.close();
+                }
+            });
+            if let Some(path) = reopen {
+                self.request_open(path);
+            }
             if icons::icon_button(ui, Icon::Save, false, self.is_dirty())
                 .on_hover_text("Save changes into the file (Ctrl+S)")
                 .on_disabled_hover_text("Save (nothing to save yet)")
@@ -807,6 +897,9 @@ impl ReaderApp {
                 .clicked()
             {
                 self.save_as();
+            }
+            if icons::icon_button(ui, Icon::Print, false, has_doc).on_hover_text("Print (Ctrl+P)").clicked() {
+                self.print();
             }
 
             ui.separator();
@@ -844,6 +937,21 @@ impl ReaderApp {
                     ui.close();
                 }
                 ui.separator();
+                let mut dark = self.session.dark_pages;
+                if ui.checkbox(&mut dark, "Dark pages").on_hover_text("Light text on dark pages, for reading at night").changed() {
+                    self.set_dark_pages(dark);
+                    ui.close();
+                }
+                ui.separator();
+                if ui.add_enabled(self.nav.can_go_back(), egui::Button::new("Back (Alt+Left)")).clicked() {
+                    self.go_back();
+                    ui.close();
+                }
+                if ui.add_enabled(self.nav.can_go_forward(), egui::Button::new("Forward (Alt+Right)")).clicked() {
+                    self.go_forward();
+                    ui.close();
+                }
+                ui.separator();
                 if ui.button(if self.fullscreen { "Leave full screen (F11)" } else { "Full screen (F11)" }).clicked() {
                     let on = !self.fullscreen;
                     self.set_fullscreen(ui.ctx(), on);
@@ -876,7 +984,18 @@ impl ReaderApp {
                 // One side panel on the left at a time.
                 if self.pages.open {
                     self.comments.panel_open = false;
+                    self.nav.outline_open = false;
                     self.pages.reset(true);
+                }
+            }
+            if icons::icon_button(ui, Icon::Outline, self.nav.outline_open, has_doc)
+                .on_hover_text("Outline: the document's table of contents")
+                .clicked()
+            {
+                self.nav.outline_open = !self.nav.outline_open;
+                if self.nav.outline_open {
+                    self.pages.open = false;
+                    self.comments.panel_open = false;
                 }
             }
 
@@ -902,6 +1021,7 @@ impl ReaderApp {
                 self.comments.panel_open = !self.comments.panel_open;
                 if self.comments.panel_open {
                     self.pages.open = false;
+                    self.nav.outline_open = false;
                 }
             }
 
@@ -1202,6 +1322,7 @@ impl ReaderApp {
             self.placement_overlay(ui, &page_hits, scale);
         } else {
             self.page_interactions(&ctx, &page_hits, scale);
+            self.link_interactions(&ctx, &page_hits, scale);
             self.comment_overlays(ui, &page_hits, scale);
             self.forms_overlay(ui, &page_hits, scale);
         }
@@ -1264,6 +1385,9 @@ impl ReaderApp {
     fn welcome(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.3);
+            if self.session.password.is_some() {
+                return; // the password window is in front
+            }
             if self.opening {
                 ui.spinner();
                 ui.label("Opening…");
@@ -1275,6 +1399,14 @@ impl ReaderApp {
             if ui.button("Open a file").clicked() {
                 self.open_dialog();
             }
+            if !self.session.recent.is_empty() {
+                ui.add_space(20.0);
+                ui.label(egui::RichText::new("Recent files").strong());
+                ui.add_space(4.0);
+                if let Some(path) = self.recent_list(ui, 8) {
+                    self.request_open(path);
+                }
+            }
         });
     }
 
@@ -1284,7 +1416,16 @@ impl ReaderApp {
             return;
         }
         ctx.request_repaint();
-        let idle = self.doc.is_some()
+        // A protected file waits for its password before anything else can run.
+        if self.session.password.is_some() {
+            if let Some(password) = self.dev_steps.last().and_then(|s| s.strip_prefix("password=")).map(str::to_owned) {
+                self.dev_steps.pop();
+                self.submit_password(password);
+                return;
+            }
+        }
+        let idle = (self.doc.is_some() || self.session.password.is_some() || self.dev_steps.last().is_some_and(|s| s == "welcome"))
+            && !self.print_busy
             && !self.opening
             && self.last_want.is_empty()
             && !self.search.busy
@@ -1344,6 +1485,40 @@ impl ReaderApp {
                     }),
                     "comments" => self.comments.panel_open = true,
                     "pages" => self.pages.open = true,
+                    "welcome" => {}
+                    "darkpages" => self.set_dark_pages(true),
+                    "lightpages" => self.set_dark_pages(false),
+                    "outline" => self.nav.outline_open = true,
+                    // tab=path opens another file in a new tab; tab=2 switches to the second tab
+                    "tab" => match arg.parse::<usize>() {
+                        Ok(n) => self.switch_tab(n.saturating_sub(1)),
+                        Err(_) => {
+                            self.request_open(PathBuf::from(arg));
+                        }
+                    },
+                    "closetab" => self.close_tab(self.session.active),
+                    // link=N follows the N-th link on the current page
+                    "link" => {
+                        let target = self.nav.links.get(&self.current_page).and_then(|l| l.get(arg.parse::<usize>().unwrap_or(1).saturating_sub(1))).map(|l| l.target.clone());
+                        match target {
+                            Some(rogeha_core::LinkTarget::Page(page)) => self.jump_to(page),
+                            other => self.info(format!("link: {other:?}")),
+                        }
+                    }
+                    // firstlink jumps through the first link on this page that leads to another page
+                    "firstlink" => {
+                        let here = self.current_page;
+                        let page = self.nav.links.get(&here).and_then(|l| l.iter().find_map(|l| match l.target {
+                            rogeha_core::LinkTarget::Page(p) if p != here => Some(p),
+                            _ => None,
+                        }));
+                        match page {
+                            Some(page) => self.jump_to(page),
+                            None => self.error("no internal link on this page"),
+                        }
+                    }
+                    "back" => self.go_back(),
+                    "print" => self.dev_print(arg),
                     // view=single | spread | cover
                     "view" => self.set_view(match arg {
                         "spread" => ViewMode::Spread,
@@ -1462,6 +1637,9 @@ impl ReaderApp {
                 self.toolbar(ui);
                 ui.add_space(3.0);
             });
+            if self.session.tabs.len() > 1 {
+                egui::Panel::top("tabs").show(ui, |ui| self.tab_strip(ui));
+            }
             egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         } else if self.fullscreen_since.is_some_and(|t| t.elapsed() < Duration::from_secs(4)) {
             egui::Area::new(egui::Id::unique("fullscreen-hint"))
@@ -1479,6 +1657,11 @@ impl ReaderApp {
             egui::Panel::left("pages")
                 .default_size(190.0)
                 .show(ui, |ui| self.pages_panel(ui));
+        }
+        if chrome && self.nav.outline_open && self.doc.is_some() {
+            egui::Panel::left("outline")
+                .default_size(260.0)
+                .show(ui, |ui| self.outline_panel(ui));
         }
         if chrome && self.comments.panel_open && self.doc.is_some() {
             egui::Panel::left("comments")
@@ -1506,6 +1689,7 @@ impl ReaderApp {
                 }
             });
 
+        self.password_window(&ctx);
         self.comment_editor(&ctx);
         self.compress_window(&ctx);
         self.about_window(&ctx);

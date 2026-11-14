@@ -14,6 +14,8 @@ pub enum Icon {
     Open,
     Save,
     SaveAs,
+    Print,
+    Outline,
     ZoomOut,
     ZoomIn,
     FitWidth,
@@ -125,6 +127,20 @@ fn draw(ui: &Ui, icon: Icon, centre: Pos2, ink: Color32) {
             line(&[(8.0, 4.0), (8.0, 9.0), (15.0, 9.0), (15.0, 4.0)]);
             line(&[(18.0, 15.0), (18.0, 21.0)]);
             line(&[(15.0, 18.0), (21.0, 18.0)]);
+        }
+        Icon::Print => {
+            // A printer: paper going in at the top, the body, the printed sheet coming out.
+            line(&[(7.0, 8.0), (7.0, 3.5), (17.0, 3.5), (17.0, 8.0)]);
+            line(&[(7.0, 17.0), (3.5, 17.0), (3.5, 8.0), (20.5, 8.0), (20.5, 17.0), (17.0, 17.0)]);
+            closed(&[(7.0, 13.5), (17.0, 13.5), (17.0, 20.5), (7.0, 20.5)]);
+        }
+        Icon::Outline => {
+            // A table of contents: three entries, the lower two indented.
+            line(&[(4.0, 6.0), (20.0, 6.0)]);
+            line(&[(8.0, 12.0), (20.0, 12.0)]);
+            line(&[(8.0, 18.0), (20.0, 18.0)]);
+            painter.circle_filled(at(4.3, 12.0), 0.9 * unit, ink);
+            painter.circle_filled(at(4.3, 18.0), 0.9 * unit, ink);
         }
         Icon::ZoomOut => {
             magnifier();
