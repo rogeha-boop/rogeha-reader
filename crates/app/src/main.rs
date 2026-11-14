@@ -28,6 +28,14 @@ fn main() {
     if args.get(1).is_some_and(|a| a == "--compress") {
         std::process::exit(compress_helper(&args[2..]));
     }
+    // Helper mode of the compressor itself: `rogeha-reader --subset-fonts <in.pdf> <out.pdf>`.
+    if args.get(1).is_some_and(|a| a == "--subset-fonts") {
+        let done = match &args[2..] {
+            [input, output] => rogeha_core::subset_fonts(input.as_ref(), output.as_ref()).is_ok(),
+            _ => false,
+        };
+        std::process::exit(if done { 0 } else { 1 });
+    }
     // Helper mode: `rogeha-reader --ocr <in.pdf> <out.pdf> <language> <language data folder>`.
     if args.get(1).is_some_and(|a| a == "--ocr") {
         std::process::exit(ocr_helper(&args[2..]));
@@ -91,11 +99,12 @@ fn compress_helper(args: &[std::ffi::OsString]) -> i32 {
     let result = match args {
         [input, output, preset] => {
             match rogeha_core::Preset::from_id(&preset.to_string_lossy()) {
-                Some(preset) => rogeha_core::compress_pdf(input.as_ref(), output.as_ref(), preset),
-                None => Err("Unknown preset (use high, balanced or small)".to_owned()),
+                // This program is also the helper that trims fonts (--subset-fonts above).
+                Some(preset) => rogeha_core::compress_pdf_with(input.as_ref(), output.as_ref(), preset, std::env::current_exe().ok().as_deref()),
+                None => Err("Unknown preset (use high, balanced, small or tiny)".to_owned()),
             }
         }
-        _ => Err("Usage: rogeha-reader --compress <in.pdf> <out.pdf> <high|balanced|small>".to_owned()),
+        _ => Err("Usage: rogeha-reader --compress <in.pdf> <out.pdf> <high|balanced|small|tiny>".to_owned()),
     };
     match result {
         Ok(stats) => {
@@ -109,6 +118,7 @@ fn compress_helper(args: &[std::ffi::OsString]) -> i32 {
                     "pages_restored": stats.pages_restored,
                     "images_untouched": stats.images_untouched,
                     "picture_bytes": stats.picture_bytes,
+                    "picture_dpi": stats.picture_dpi,
                 })
             );
             0

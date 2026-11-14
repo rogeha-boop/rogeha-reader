@@ -10,7 +10,17 @@ use rogeha_core::Preset;
 use super::ReaderApp;
 
 pub(super) enum Outcome {
-    Done { before: u64, after: u64, restored: u64, images_untouched: bool, pictures: u64, output: PathBuf },
+    Done {
+        before: u64,
+        after: u64,
+        restored: u64,
+        images_untouched: bool,
+        pictures: u64,
+        /// The resolution the pictures were stored at, and the limit of the setting used.
+        picture_dpi: u32,
+        limit_dpi: u32,
+        output: PathBuf,
+    },
     Failed(String),
 }
 
@@ -68,6 +78,8 @@ fn run_helper(input: PathBuf, output: PathBuf, preset: Preset) -> Outcome {
         restored: v["pages_restored"].as_u64().unwrap_or(0),
         images_untouched: v["images_untouched"].as_bool().unwrap_or(false),
         pictures: v["picture_bytes"].as_u64().unwrap_or(0),
+        picture_dpi: v["picture_dpi"].as_u64().unwrap_or(0) as u32,
+        limit_dpi: preset.dpi(),
         output,
     }
 }
@@ -136,7 +148,7 @@ impl ReaderApp {
             .show(ctx, |ui| {
                 ui.set_width(380.0);
                 ui.label("Makes a PDF smaller: pictures are stored more efficiently, and data that no reader shows is taken out. Text, comments and black-and-white pages are kept exactly. You get a new file; the original is not changed.");
-                ui.label(egui::RichText::new("The three settings differ only in how pictures are stored. A file that is mostly text and drawings comes out about the same size with each.").weak().small());
+                ui.label(egui::RichText::new("The settings differ only in how pictures are stored: a picture already below a setting's resolution is left as it is. A file that is mostly text and drawings comes out about the same size with each.").weak().small());
                 if let Some(size) = size {
                     ui.label(egui::RichText::new(format!("Current size: {}", megabytes(size))).weak());
                 }
@@ -162,7 +174,7 @@ impl ReaderApp {
                     start = true;
                 }
                 match &self.compress.outcome {
-                    Some(Outcome::Done { before, after, restored, images_untouched, pictures, output }) => {
+                    Some(Outcome::Done { before, after, restored, images_untouched, pictures, picture_dpi, limit_dpi, output }) => {
                         ui.separator();
                         let saved = if *before > 0 { 100.0 - *after as f64 * 100.0 / *before as f64 } else { 0.0 };
                         if saved >= 1.0 {
@@ -179,6 +191,16 @@ impl ReaderApp {
                         if share < 25.0 {
                             ui.label(format!(
                                 "Pictures were only {share:.0}% of this file; the rest is text, drawings and fonts. The other settings would give about the same size."
+                            ));
+                        } else if *picture_dpi > 0 && (*picture_dpi as f32) <= *limit_dpi as f32 * 1.125 {
+                            // Scanner apps and other compressors leave pictures at about 150 dpi.
+                            let advice = if *limit_dpi > 96 {
+                                "Only a setting with a lower limit makes them smaller."
+                            } else {
+                                "There is little left to save."
+                            };
+                            ui.label(format!(
+                                "The pictures in this file are stored at about {picture_dpi} dpi, which is not above this setting's limit of {limit_dpi} dpi, so they were left as they are. {advice}"
                             ));
                         }
                         if *images_untouched {

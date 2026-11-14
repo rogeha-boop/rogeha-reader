@@ -39,11 +39,12 @@ AI assistant work; offline translation is planned (see [PLAN.md](PLAN.md)).
   readers validate. The signer's certificate is not yet checked against trusted authorities
 - **OCR** (Pages menu): makes scanned PDFs searchable and selectable by adding an invisible text layer;
   the pages look exactly the same. Language data is downloaded once per language, then it works offline
-- **Compress PDFs** (Tools menu) into a smaller copy: pictures are stored more efficiently at one of three
-  settings (up to 300, 200 or 144 dpi), and data that no reader shows is taken out (metadata copies on
-  pictures, a design program's private data, thumbnails, and at the smallest setting the print shop's colour
-  profile). Text and black-and-white pages are kept exactly, and the original file is never changed. The
-  settings only differ for pictures, so the window says when pictures were a small part of the file
+- **Compress PDFs** (Tools menu) into a smaller copy: pictures are stored more efficiently at one of four
+  settings (up to 300, 200, 144 or 96 dpi), embedded fonts are trimmed to the letters in use, and data that
+  no reader shows is taken out (metadata copies on pictures, a design program's private data, thumbnails, and
+  at the two smallest settings the print shop's colour profile). Text and black-and-white pages are kept exactly, and the original file is never changed. The
+  settings only differ for pictures above their resolution, so the window says when pictures were a small
+  part of the file or were already stored below the setting's limit
 - Select and copy text (drag, then Copy or Ctrl+C)
 - Text search with highlighted matches
 - Drag and drop, open from the command line (`rogeha-reader file.pdf`)

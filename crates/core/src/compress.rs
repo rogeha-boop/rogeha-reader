@@ -16,6 +16,9 @@
 //! and [`CompressStats::picture_bytes`] tells the reader how much of the file was pictures, so
 //! it can say why the settings made little difference when they did.
 //!
+//! Embedded fonts are trimmed to the letters the document uses ([`trim_fonts`]): a file that
+//! carries two whole fonts for a few lines of text carries a quarter of a megabyte for nothing.
+//!
 //! The result always goes to a **new file**; the original is never touched.
 //!
 //! Safety net: MuPDF's rewriter re-writes each page's drawing instructions, and on some PDFs
@@ -46,19 +49,25 @@ pub enum Preset {
     HighQuality,
     /// Keeps up to 200 dpi, JPEG quality 75. Looks the same on screen; the default.
     Balanced,
-    /// Keeps up to 144 dpi, JPEG quality 60, and drops the print colour profile. Smallest;
-    /// fine print may soften.
+    /// Keeps up to 144 dpi, JPEG quality 60, and drops the print colour profile. Fine print
+    /// may soften.
     Small,
+    /// Keeps up to 96 dpi, JPEG quality 55: screen resolution. For sending by e-mail. Also the
+    /// only setting that still does something for a file whose pictures were already reduced
+    /// to 150 dpi, which is what scanner apps and other compressors produce.
+    Tiny,
 }
 
 impl Preset {
-    pub const ALL: [Preset; 3] = [Preset::HighQuality, Preset::Balanced, Preset::Small];
+    /// From gentlest to strongest.
+    pub const ALL: [Preset; 4] = [Preset::HighQuality, Preset::Balanced, Preset::Small, Preset::Tiny];
 
     pub fn id(self) -> &'static str {
         match self {
             Preset::HighQuality => "high",
             Preset::Balanced => "balanced",
             Preset::Small => "small",
+            Preset::Tiny => "tiny",
         }
     }
 
@@ -70,7 +79,8 @@ impl Preset {
         match self {
             Preset::HighQuality => "High quality",
             Preset::Balanced => "Balanced",
-            Preset::Small => "Smallest file",
+            Preset::Small => "Small file",
+            Preset::Tiny => "Smallest file",
         }
     }
 
@@ -78,7 +88,8 @@ impl Preset {
         match self {
             Preset::HighQuality => "Up to 300 dpi. For printing and archiving.",
             Preset::Balanced => "Up to 200 dpi. Looks the same on screen. Recommended.",
-            Preset::Small => "Up to 144 dpi. Smallest; very fine print may soften, and print colours may shift a shade.",
+            Preset::Small => "Up to 144 dpi. Very fine print may soften, and print colours may shift a shade.",
+            Preset::Tiny => "Up to 96 dpi. For e-mail: readable on screen, soft when zoomed in or printed.",
         }
     }
 
@@ -86,7 +97,12 @@ impl Preset {
     /// Without it, colours given in printing inks come out a shade different (measured on a
     /// brand red: 227, 0, 14 became 237, 28, 36). Only the smallest preset accepts that.
     fn keeps_print_profile(self) -> bool {
-        self != Preset::Small
+        matches!(self, Preset::HighQuality | Preset::Balanced)
+    }
+
+    /// The resolution above which pictures are scaled down, in dots per inch.
+    pub fn dpi(self) -> u32 {
+        self.settings().0 as u32
     }
 
     /// (target dpi, JPEG quality)
@@ -95,6 +111,7 @@ impl Preset {
             Preset::HighQuality => (300, c"85"),
             Preset::Balanced => (200, c"75"),
             Preset::Small => (144, c"60"),
+            Preset::Tiny => (96, c"55"),
         }
     }
 }
@@ -111,6 +128,10 @@ pub struct CompressStats {
     /// How many bytes of the original file were pictures. The resolution settings change
     /// only these.
     pub picture_bytes: u64,
+    /// The resolution the pictures were stored at in the original, in dots per inch: the
+    /// value that half of all picture dots lie above. 0 when there are no pictures. A setting
+    /// whose limit is above this has little to reduce.
+    pub picture_dpi: u32,
 }
 
 impl CompressStats {
@@ -142,9 +163,20 @@ unsafe fn take_error(e: *mut sys::mupdf_error_t) -> Option<String> {
     Some(message)
 }
 
-/// One raw MuPDF pass: open `input`, optionally re-encode its images, and write a tidy
-/// `output`. Returns the page count.
-fn raw_pass(input: &Path, output: &Path, preset: Preset, rewrite_images: bool) -> Result<usize> {
+/// What a raw pass does to the document before writing it out tidily.
+#[derive(Clone, Copy, PartialEq)]
+enum Work {
+    /// Nothing more.
+    Tidy,
+    /// Re-encode the pictures.
+    Images,
+    /// Trim the embedded fonts to the glyphs in use.
+    Fonts,
+}
+
+/// One raw MuPDF pass: open `input`, do `work`, and write a tidy `output`. Returns the page
+/// count.
+fn raw_pass(input: &Path, output: &Path, preset: Preset, work: Work) -> Result<usize> {
     let c_in = CString::new(input.to_str().ok_or("File path is not valid Unicode")?)
         .map_err(|e| e.to_string())?;
     let c_out = CString::new(output.to_str().ok_or("File path is not valid Unicode")?)
@@ -211,8 +243,10 @@ fn raw_pass(input: &Path, output: &Path, preset: Preset, rewrite_images: bool) -
         // Never make an image bigger.
         o.recompress_when = sys::FZ_RECOMPRESS_WHEN_SMALLER as i32;
 
-        if rewrite_images {
-            sys::pdf_rewrite_images(ctx, pdf, &mut o);
+        match work {
+            Work::Images => sys::pdf_rewrite_images(ctx, pdf, &mut o),
+            Work::Fonts => sys::pdf_subset_fonts(ctx, pdf, 0, ptr::null()),
+            Work::Tidy => {}
         }
 
         let mut w = sys::pdf_default_write_options;
@@ -234,8 +268,18 @@ fn raw_pass(input: &Path, output: &Path, preset: Preset, rewrite_images: bool) -
     }
 }
 
-/// Compress `input` into `output` (which must be a different file).
+/// Compress `input` into `output` (which must be a different file), without trimming fonts.
 pub fn compress_pdf(input: &Path, output: &Path, preset: Preset) -> Result<CompressStats> {
+    compress_pdf_with(input, output, preset, None)
+}
+
+/// Compress `input` into `output` (which must be a different file).
+///
+/// `font_helper` is a program that trims fonts when started as
+/// `<program> --subset-fonts <in.pdf> <out.pdf>` (see [`subset_fonts`]); the reader passes
+/// itself. Without one, fonts are left as they are. It is asked for, never guessed: starting
+/// "this program" blindly would start whatever happens to be running this code.
+pub fn compress_pdf_with(input: &Path, output: &Path, preset: Preset, font_helper: Option<&Path>) -> Result<CompressStats> {
     if input == output {
         return Err("Choose a different file name for the compressed copy".into());
     }
@@ -245,7 +289,7 @@ pub fn compress_pdf(input: &Path, output: &Path, preset: Preset) -> Result<Compr
         name.push(tag);
         std::path::PathBuf::from(name)
     };
-    let temps = [temp(".rr-1"), temp(".rr-2"), temp(".rr-3")];
+    let temps = [temp(".rr-1"), temp(".rr-2"), temp(".rr-3"), temp(".rr-5")];
     let candidate = temp(".rr-4");
     let cleanup = || {
         for file in temps.iter().chain([&candidate]) {
@@ -254,9 +298,10 @@ pub fn compress_pdf(input: &Path, output: &Path, preset: Preset) -> Result<Compr
     };
     let size = |p: &Path| std::fs::metadata(p).map(|m| m.len()).unwrap_or(u64::MAX);
 
-    let run = || -> Result<(Outcome, u64)> {
+    let run = || -> Result<(Outcome, u64, u32)> {
         let picture_bytes = picture_bytes(input)?;
-        let mut best = build(input, output, Some(preset), preset, &temps)?;
+        let picture_dpi = picture_dpi(input)?;
+        let mut best = build(input, output, Some(preset), preset, &temps, font_helper)?;
         // Re-encoding a picture has side costs that MuPDF's own "only when smaller" check does
         // not see: the page's drawing instructions are written anew, and a picture in printing
         // inks gets a colour profile of its own (139 KB in one print-shop file, to save 19 KB of
@@ -267,18 +312,18 @@ pub fn compress_pdf(input: &Path, output: &Path, preset: Preset) -> Result<Compr
         if picture_bytes * 4 < bytes_before {
             let gentler = Preset::ALL.into_iter().take_while(|p| *p != preset).map(Some);
             for images in gentler.chain([None]) {
-                let outcome = build(input, &candidate, images, preset, &temps)?;
+                let outcome = build(input, &candidate, images, preset, &temps, font_helper)?;
                 if size(&candidate) < size(output) {
                     std::fs::copy(&candidate, output).map_err(|e| e.to_string())?;
                     best = outcome;
                 }
             }
         }
-        Ok((best, picture_bytes))
+        Ok((best, picture_bytes, picture_dpi))
     };
     let result = run();
     cleanup();
-    let (outcome, picture_bytes) = match result {
+    let (outcome, picture_bytes, picture_dpi) = match result {
         Ok(r) => r,
         Err(e) => {
             let _ = std::fs::remove_file(output);
@@ -293,6 +338,7 @@ pub fn compress_pdf(input: &Path, output: &Path, preset: Preset) -> Result<Compr
         pages_restored: outcome.pages_restored,
         images_untouched: outcome.images_untouched,
         picture_bytes,
+        picture_dpi,
     })
 }
 
@@ -305,32 +351,153 @@ struct Outcome {
 }
 
 /// Build one compressed copy of `input` at `output`: pictures re-encoded as `images` says
-/// (`None` leaves them alone), unseen data taken out as `preset` says. `temps` are three
-/// scratch files.
-fn build(input: &Path, output: &Path, images: Option<Preset>, preset: Preset, temps: &[std::path::PathBuf; 3]) -> Result<Outcome> {
-    let [step1, step2, step3] = temps;
+/// (`None` leaves them alone), unseen data taken out as `preset` says, fonts trimmed. `temps`
+/// are four scratch files.
+fn build(
+    input: &Path,
+    output: &Path,
+    images: Option<Preset>,
+    preset: Preset,
+    temps: &[std::path::PathBuf; 4],
+    font_helper: Option<&Path>,
+) -> Result<Outcome> {
+    let [step1, step2, step3, step4] = temps;
+    // The last two steps of every way: trim the fonts, then the final tidy write (object
+    // streams, duplicate removal).
+    let finish = |stripped: &Path| -> Result<usize> {
+        let trimmed = font_helper.is_some_and(|helper| trim_fonts(helper, stripped, step4));
+        let source = if trimmed { step4.as_path() } else { stripped };
+        raw_pass(source, output, preset, Work::Tidy)
+    };
     let Some(images) = images else {
         strip_extras(input, step3, preset)?;
-        let pages = raw_pass(step3, output, preset, false)?;
+        let pages = finish(step3)?;
         return Ok(Outcome { pages, pages_restored: 0, images_untouched: false });
     };
     // 1. Re-encode images.
-    let pages = raw_pass(input, step1, images, true)?;
+    let pages = raw_pass(input, step1, images, Work::Images)?;
     // 2. Check every page; put back the content of pages that changed beyond their images.
     match restore_changed_pages(input, step1, step2)? {
         Some(pages_restored) => {
             // 3. Take out what no reader shows.
             strip_extras(step2, step3, preset)?;
-            // 4. Final tidy write (object streams, duplicate removal).
-            raw_pass(step3, output, preset, false)?;
+            // 4. Fonts, and the final write.
+            finish(step3)?;
             Ok(Outcome { pages, pages_restored, images_untouched: false })
         }
         None => {
             // Could not get an exact match: do not risk it, keep the images as they are.
             strip_extras(input, step3, preset)?;
-            raw_pass(step3, output, preset, false)?;
+            finish(step3)?;
             Ok(Outcome { pages, pages_restored: 0, images_untouched: true })
         }
+    }
+}
+
+/// The helper behind [`trim_fonts`]: trim every embedded font of `input` to the glyphs the
+/// document uses and write the result to `output`. Run it in a process of its own
+/// (`rogeha-reader --subset-fonts <in> <out>`): MuPDF ends the process when a font is too
+/// damaged to trim, and that must not end the compression.
+pub fn subset_fonts(input: &Path, output: &Path) -> Result<()> {
+    raw_pass(input, output, Preset::Balanced, Work::Fonts).map(|_| ())
+}
+
+/// Trim the embedded fonts of `source` into `target`. Returns whether `target` is to be used.
+///
+/// The result is only taken when it is safe and worth it:
+///
+/// * not for a form: a field that is filled in later needs letters nobody has typed yet;
+/// * the trimming runs in a process of its own (`helper`), so a font MuPDF cannot handle
+///   costs the saving, not the whole compression;
+/// * every page must come out exactly as before, dot for dot;
+/// * and the file must be smaller.
+fn trim_fonts(helper: &Path, source: &Path, target: &Path) -> bool {
+    let _ = std::fs::remove_file(target);
+    let is_form = || {
+        let doc = PdfDocument::open(source.to_str()?).ok()?;
+        doc.has_acro_form().ok()
+    };
+    if is_form() != Some(false) {
+        return false;
+    }
+    let mut helper = std::process::Command::new(helper);
+    helper.arg("--subset-fonts").arg(source).arg(target);
+    helper.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        helper.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let size = |p: &Path| std::fs::metadata(p).map(|m| m.len()).ok();
+    let worked = helper.status().is_ok_and(|status| status.success());
+    let keep = worked && matches!((size(target), size(source)), (Some(new), Some(old)) if new < old) && same_look(source, target) == Ok(true);
+    if !keep {
+        let _ = std::fs::remove_file(target);
+    }
+    keep
+}
+
+/// Do two documents show exactly the same on every page? Rendered at 72 dpi and compared dot
+/// for dot.
+fn same_look(a: &Path, b: &Path) -> Result<bool> {
+    let (a, b) = (crate::engine::Engine::open(a)?, crate::engine::Engine::open(b)?);
+    if a.page_count() != b.page_count() {
+        return Ok(false);
+    }
+    for page in 0..a.page_count() {
+        let (one, other) = (a.render(page, 1.0)?, b.render(page, 1.0)?);
+        if one.width != other.width || one.pixels != other.pixels {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// The resolution the document's pictures are stored at: every picture's dots per inch as it
+/// is placed on its page, and of those the value that half of all picture dots lie above.
+fn picture_dpi(input: &Path) -> Result<u32> {
+    let doc = PdfDocument::open(input.to_str().ok_or("File path is not valid Unicode")?).map_err(err)?;
+    let found = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    for page in 0..doc.page_count().map_err(err)? {
+        let device = Device::from_native(Resolutions { found: found.clone() }).map_err(err)?;
+        // A page that cannot be drawn has no pictures to count.
+        if let Ok(p) = doc.load_page(page) {
+            let _ = p.run(&device, &Matrix::IDENTITY);
+        }
+    }
+    let mut found: Vec<(u32, u64)> = found.take();
+    found.sort_unstable();
+    let half = found.iter().map(|(_, dots)| dots).sum::<u64>() / 2;
+    let mut below = 0;
+    for (dpi, dots) in found {
+        below += dots;
+        if below >= half {
+            return Ok(dpi);
+        }
+    }
+    Ok(0)
+}
+
+/// Collects (dots per inch, number of dots) for every picture a page draws.
+struct Resolutions {
+    found: std::rc::Rc<std::cell::RefCell<Vec<(u32, u64)>>>,
+}
+
+impl Resolutions {
+    fn note(&mut self, image: &mupdf::Image, ctm: Matrix) {
+        // A picture is drawn into the unit square, which `ctm` maps onto the page (in points).
+        let width = (ctm.a * ctm.a + ctm.b * ctm.b).sqrt();
+        let height = (ctm.c * ctm.c + ctm.d * ctm.d).sqrt();
+        if width > 0.5 && height > 0.5 {
+            let dpi = (image.width() as f32 * 72.0 / width).max(image.height() as f32 * 72.0 / height);
+            self.found.borrow_mut().push((dpi.round() as u32, image.width() as u64 * image.height() as u64));
+        }
+    }
+}
+
+impl NativeDevice for Resolutions {
+    fn fill_image(&mut self, image: &mupdf::Image, ctm: Matrix, _: f32, _: mupdf::ColorParams) {
+        self.note(image, ctm);
     }
 }
 

@@ -361,6 +361,38 @@ fn compressing_takes_out_what_no_reader_shows() {
 }
 
 #[test]
+fn trimming_fonts_leaves_every_page_looking_the_same() {
+    // The reader's own tour carries three embedded fonts.
+    let tour = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../package/store-shot-samples/rogeha-reader-tour.pdf");
+    let trimmed = std::env::temp_dir().join(format!("rogeha-test-{}-fonts.pdf", std::process::id()));
+    rogeha_core::subset_fonts(&tour, &trimmed).unwrap();
+    let (before, after) = (Engine::open(&tour).unwrap(), Engine::open(&trimmed).unwrap());
+    assert_eq!(before.page_count(), after.page_count());
+    for page in 0..before.page_count() {
+        assert_eq!(before.page_text(page).unwrap(), after.page_text(page).unwrap(), "text of page {}", page + 1);
+        assert!(before.render(page, 1.0).unwrap().pixels == after.render(page, 1.0).unwrap().pixels, "page {} looks different", page + 1);
+    }
+    drop((before, after));
+    std::fs::remove_file(trimmed).unwrap();
+}
+
+#[test]
+fn the_strongest_setting_reduces_pictures_the_others_leave() {
+    // The scan is stored at 400 dpi: every setting reduces it, each more than the one before.
+    let scan = scan_fixture("compress-steps");
+    let mut sizes = Vec::new();
+    for preset in Preset::ALL {
+        let out = scan.with_extension(format!("{}.pdf", preset.id()));
+        let stats = compress_pdf(&scan, &out, preset).unwrap();
+        assert_eq!(stats.picture_dpi, 400, "the scan's pictures are at 400 dpi");
+        sizes.push(stats.bytes_after);
+        std::fs::remove_file(out).unwrap();
+    }
+    assert!(sizes.windows(2).all(|pair| pair[1] < pair[0]), "each setting is smaller than the one before: {sizes:?}");
+    std::fs::remove_file(scan).unwrap();
+}
+
+#[test]
 fn an_archive_copy_keeps_its_colour_profile() {
     // PDF/A files must carry their output intent, at every setting.
     let source = print_shop_fixture("compress-pdfa", true);
