@@ -128,13 +128,14 @@ impl Session {
 
 /// Turn a rendered page light-on-dark: lightness is flipped and hue kept, so black text on
 /// white becomes white on black while a red stays red.
-pub(super) fn darken(pixels: &mut [u32]) {
-    for px in pixels {
-        let (r, g, b) = ((*px >> 16 & 0xFF) as i32, (*px >> 8 & 0xFF) as i32, (*px & 0xFF) as i32);
+/// `rgb` is three bytes per pixel: red, green, blue.
+pub(super) fn darken(rgb: &mut [u8]) {
+    for px in rgb.chunks_exact_mut(3) {
+        let (r, g, b) = (px[0] as i32, px[1] as i32, px[2] as i32);
         let shift = 255 - r.max(g).max(b) - r.min(g).min(b);
         // Not quite black: easier on the eyes and matches the dark theme.
-        let lift = |c: i32| (((c + shift) * 225 / 255) + 30) as u32;
-        *px = lift(r) << 16 | lift(g) << 8 | lift(b);
+        let lift = |c: i32| (((c + shift) * 225 / 255) + 30) as u8;
+        px.copy_from_slice(&[lift(r), lift(g), lift(b)]);
     }
 }
 
@@ -395,12 +396,12 @@ mod tests {
 
     #[test]
     fn dark_pages_flip_lightness_and_keep_hue() {
-        let mut px = [0x00FF_FFFF, 0x0000_0000, 0x00FF_0000, 0x0080_8080];
+        let mut px = [0xFF, 0xFF, 0xFF, 0, 0, 0, 0xFF, 0, 0, 0x80, 0x80, 0x80];
         darken(&mut px);
-        assert_eq!(px[0], 0x001E_1E1E, "white paper becomes near black");
-        assert_eq!(px[1], 0x00FF_FFFF, "black text becomes white");
-        assert_eq!(px[2], 0x00FF_1E1E, "pure red stays red");
-        let grey = px[3] & 0xFF;
+        assert_eq!(px[0..3], [0x1E, 0x1E, 0x1E], "white paper becomes near black");
+        assert_eq!(px[3..6], [0xFF, 0xFF, 0xFF], "black text becomes white");
+        assert_eq!(px[6..9], [0xFF, 0x1E, 0x1E], "pure red stays red");
+        let grey = px[11] as u32;
         assert!((0x80..0xA0).contains(&grey), "mid grey stays in the middle");
     }
 

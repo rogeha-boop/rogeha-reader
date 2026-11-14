@@ -8,7 +8,7 @@ use egui::{
 };
 use std::sync::Arc;
 
-use rogeha_core::{DocInfo, Event, HitQuad, PageImage, RenderKey, Request, Worker};
+use rogeha_core::{DocInfo, Event, HitQuad, RenderKey, Request, Worker};
 
 use crate::icons::{self, Icon};
 use crate::theme;
@@ -23,6 +23,7 @@ mod forms;
 mod navigate;
 mod ocr;
 mod pages_panel;
+mod pagestore;
 mod print;
 mod session;
 mod sign;
@@ -39,9 +40,11 @@ const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 8.0;
 const ZOOM_SETTLE: Duration = Duration::from_millis(70);
 
+pub use pagestore::{PagePixels, dot};
+
 struct PageTex {
     key: RenderKey,
-    image: Arc<PageImage>,
+    image: pagestore::Stored,
 }
 
 /// What the runner should draw underneath the UI this frame: the document area and its
@@ -52,7 +55,7 @@ pub struct PageLayer {
     pub clip: Rect,
     pub background: Color32,
     /// Page rectangles in egui points, with the image if it has been rendered.
-    pub pages: Vec<(Rect, Option<Arc<PageImage>>)>,
+    pub pages: Vec<(Rect, Option<Arc<PagePixels>>)>,
 }
 
 /// How pages are laid out.
@@ -544,15 +547,17 @@ impl ReaderApp {
                     if !current {
                         continue;
                     }
-                    if key.thumb {
-                        self.thumbnail_arrived(ctx, key, image);
+                    self.thumbnail_arrived(ctx, key, image);
+                }
+                Event::Page { key, mut page } => {
+                    let current = self.doc.as_ref().is_some_and(|d| d.generation == key.generation);
+                    if !current {
                         continue;
                     }
-                    let mut image = image;
                     if self.session.dark_pages {
-                        session::darken(&mut image.pixels);
+                        session::darken(&mut page.rgb);
                     }
-                    self.textures.insert(key.page, PageTex { key, image: Arc::new(image) });
+                    self.textures.insert(key.page, PageTex { key, image: pagestore::Stored::new(page) });
                     self.evict_textures();
                     if self.first_page_ms.is_none() {
                         self.first_page_ms = Some(self.started.elapsed().as_secs_f64() * 1000.0);
@@ -1336,7 +1341,8 @@ impl ReaderApp {
                 let response = ui.interact(rect, ui.scope_id().with(("page", page)), Sense::click_and_drag());
                 page_hits.push((page, rect, response));
 
-                let image = self.textures.get(&page).map(|t| t.image.clone());
+                // A page that scrolls into view is unpacked here.
+                let image = self.textures.get_mut(&page).and_then(|t| t.image.show());
                 self.layer.pages.push((rect, image));
                 painter.rect_stroke(
                     rect,
@@ -1423,6 +1429,12 @@ impl ReaderApp {
             }
         }
         self.visible_pages.clone_from(&pages);
+        // Pages that are not on screen are kept packed.
+        for (page, texture) in &mut self.textures {
+            if !visible.contains(page) {
+                texture.image.pack();
+            }
+        }
         let mut want = Vec::new();
         for page in pages {
             let (w, h) = doc.page_sizes[page];

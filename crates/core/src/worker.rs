@@ -94,7 +94,10 @@ pub enum Request {
 pub enum Event {
     /// Sent after open and after every change to the document.
     Doc(DocInfo),
+    /// A thumbnail (`key.thumb`).
     Rendered { key: RenderKey, image: PageImage },
+    /// A page for the document area.
+    Page { key: RenderKey, page: crate::engine::PageRgb },
     /// The GUI should not ask for this key again.
     RenderFailed { key: RenderKey, message: String },
     Saved(PathBuf),
@@ -209,9 +212,15 @@ fn run(rx: Receiver<Request>, etx: Sender<Event>, wake: impl Fn()) {
         }
         let Some(engine) = &st.engine else { continue };
         rendered_since_idle = true;
-        match engine.render(key.page, key.scale_milli as f32 / 1000.0) {
-            Ok(image) => {
-                if !emit(Event::Rendered { key, image }) {
+        let scale = key.scale_milli as f32 / 1000.0;
+        let rendered = if key.thumb {
+            engine.render(key.page, scale).map(|image| Event::Rendered { key, image })
+        } else {
+            engine.render_rgb(key.page, scale).map(|page| Event::Page { key, page })
+        };
+        match rendered {
+            Ok(event) => {
+                if !emit(event) {
                     return;
                 }
             }

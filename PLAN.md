@@ -138,15 +138,14 @@ Planned, in this order:
 
 ## Known gaps in the first version
 
-- **Memory is much better but still above SumatraPDF.** Measured on a high-DPI screen
-  (2200 x 1640 px window), steady after 10 s: 37 MB for an empty window, 73 MB with a one-page
-  document, 94-98 MB with a normal PDF. Where the 98 MB go: 29 MB are the window's frame, held
-  twice (2 x 14 MB); 46 MB are three rendered pages (the one on screen, part of the next, and
-  one read ahead, about 15 MB each at 4 bytes per pixel); about 15 MB are MuPDF's document,
-  fonts and glyphs; 8 MB is the program itself. On a normal 1080p screen frame and pages are
-  about a quarter the size (roughly 45 MB in all). Next steps, biggest first: keep pages that
-  are not on screen packed (text pages shrink 10-20 times) or as 3 bytes per pixel, drop the
-  second frame copy, and render only the visible part at high zoom.
+- **Memory.** Measured on a high-DPI screen (2200 x 1640 px window), steady after 8 s: 21 MB
+  for an empty window, about 40-44 MB with a document. What is left with a document: 14 MB
+  is the window's frame, 11 MB the page on screen (3 bytes per pixel), about 15 MB MuPDF's
+  document, fonts and glyphs, and a few MB the program and the packed pages around the one on
+  screen (`crates/app/src/app/pagestore.rs`). A second page on screen (two-page view, or
+  scrolled between two pages) adds another 11 MB. On a normal 1080p screen frame and pages
+  are about a quarter the size. What could still be done: render only the visible part of a
+  page at high zoom (tiles).
 - **Installed fonts are used on Windows only.** `crates/core/src/fonts.rs` answers MuPDF's
   requests from the registry's font list and the fonts Windows ships for each script (font
   files are mapped, not read, so a 20 MB Chinese font costs almost nothing). mupdf-rs's own

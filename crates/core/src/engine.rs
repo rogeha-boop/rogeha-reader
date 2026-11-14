@@ -96,6 +96,35 @@ fn pixmap_to_image(pix: &mupdf::Pixmap) -> Result<PageImage> {
     Ok(PageImage { width: w, height: h, pixels })
 }
 
+/// A rendered page as bytes: red, green and blue for each pixel, row by row. This is how
+/// MuPDF draws it, so making one is a plain copy, and it is a quarter smaller than a
+/// [`PageImage`]. The reader keeps its pages in this form.
+pub struct PageRgb {
+    pub width: usize,
+    pub height: usize,
+    pub rgb: Vec<u8>,
+}
+
+fn pixmap_to_rgb(pix: &mupdf::Pixmap) -> Result<PageRgb> {
+    let (w, h) = (pix.width() as usize, pix.height() as usize);
+    let n = pix.n() as usize;
+    let stride = pix.stride() as usize;
+    let samples = pix.samples();
+    if n < 3 || samples.len() < stride * h {
+        return Err("Unexpected pixmap format".into());
+    }
+    let mut rgb = Vec::with_capacity(w * h * 3);
+    for y in 0..h {
+        let row = &samples[y * stride..y * stride + w * n];
+        if n == 3 {
+            rgb.extend_from_slice(row);
+        } else {
+            row.chunks_exact(n).for_each(|p| rgb.extend_from_slice(&p[..3]));
+        }
+    }
+    Ok(PageRgb { width: w, height: h, rgb })
+}
+
 /// Error text when a document cannot be opened without a password.
 pub const NEEDS_PASSWORD: &str = "This document needs a password";
 /// Error text when the given password does not open the document.
@@ -353,12 +382,18 @@ impl Engine {
     }
 
     pub fn render(&self, page: usize, scale: f32) -> Result<PageImage> {
+        pixmap_to_image(&self.pixmap(page, scale)?)
+    }
+
+    /// Render a page at `scale` as red-green-blue bytes.
+    pub fn render_rgb(&self, page: usize, scale: f32) -> Result<PageRgb> {
+        pixmap_to_rgb(&self.pixmap(page, scale)?)
+    }
+
+    fn pixmap(&self, page: usize, scale: f32) -> Result<mupdf::Pixmap> {
         let p = self.doc.base().load_page(page as i32).map_err(err)?;
         let ctm = Matrix::new_scale(scale, scale);
-        let pix = p
-            .to_pixmap(&ctm, &Colorspace::device_rgb(), false, true)
-            .map_err(err)?;
-        pixmap_to_image(&pix)
+        p.to_pixmap(&ctm, &Colorspace::device_rgb(), false, true).map_err(err)
     }
 
     pub fn page_text(&self, page: usize) -> Result<String> {

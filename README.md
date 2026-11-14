@@ -104,6 +104,7 @@ The first build compiles MuPDF and its bundled libraries from source and takes s
 The result is `target/release/rogeha-reader.exe` (plus `rogeha-agent.exe`, the AI helper).
 
 `rogeha-reader.exe file.pdf --bench` prints time-to-first-page and memory use, then exits.
+Set `ROGEHA_FRAME_STATS=1` to print how long each frame took to draw.
 
 The version is MAJOR.MINOR.BUILD, where BUILD is the number of commits in the repository
 (`crates/app/build.rs`), shown in the About window with the commit id; `rogeha-reader.exe --version`

@@ -19,6 +19,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 use winit::window::{Window, WindowId};
 
+use crate::app::dot;
 use crate::app::{PageLayer, ReaderApp};
 
 type AppFactory = Box<dyn FnOnce(&egui::Context) -> ReaderApp>;
@@ -69,7 +70,9 @@ pub fn run(
         builder: builder.with_visible(false),
         sb_context,
         // softbuffer wants 0RGB u32 pixels, which is B, G, R, X in memory.
-        renderer: EguiSoftwareRender::new(ColorFieldOrder::Bgra),
+        // No cache: the library's cache is a second picture of the whole window (14 MB on a
+        // high-resolution screen), and drawing the reader's small UI afresh is just as fast.
+        renderer: EguiSoftwareRender::new(ColorFieldOrder::Bgra).with_caching(false),
         factory: Some(Box::new(factory)),
         app: None,
         gfx: None,
@@ -150,6 +153,7 @@ impl Runner {
             Ok(b) => b,
             Err(e) => return self.fail(el, format!("Could not get the window surface: {e}")),
         };
+        let frame_started = Instant::now();
         // Pages first, straight into the frame buffer; the UI is then blended on top.
         buffer.fill(0);
         draw_page_layer(
@@ -183,6 +187,10 @@ impl Runner {
                     callback.complete(image.clone());
                 }
             }
+        }
+        // Developer option: how long drawing this frame took.
+        if std::env::var_os("ROGEHA_FRAME_STATS").is_some() {
+            eprintln!("frame_ms={:.2}", frame_started.elapsed().as_secs_f64() * 1000.0);
         }
         if let Err(e) = buffer.present() {
             return self.fail(el, format!("Could not show the frame: {e}"));
@@ -316,7 +324,11 @@ fn draw_page_layer(buf: &mut [u32], width: usize, height: usize, layer: &PageLay
                     continue;
                 }
                 let n = out.len().min(img.width - sx);
-                out[..n].copy_from_slice(&img.pixels[sy * img.width + sx..][..n]);
+                // Three bytes per dot in the page, four in the window.
+                let row = &img.row(sy)[sx * 3..(sx + n) * 3];
+                for (o, p) in out[..n].iter_mut().zip(row.chunks_exact(3)) {
+                    *o = (p[0] as u32) << 16 | (p[1] as u32) << 8 | p[2] as u32;
+                }
                 out[n..].fill(WHITE);
             }
         } else {
@@ -329,16 +341,16 @@ fn draw_page_layer(buf: &mut [u32], width: usize, height: usize, layer: &PageLay
             for y in y0..y1 {
                 let fy = ((y as i64 - dy0) as u64 * step_y).min(max_fy);
                 let (sy, wy) = ((fy >> 16) as usize, (fy >> 8 & 255) as u32);
-                let row0 = &img.pixels[sy * img.width..][..img.width];
-                let row1 = &img.pixels[(sy + 1).min(img.height - 1) * img.width..][..img.width];
+                let row0 = img.row(sy);
+                let row1 = img.row((sy + 1).min(img.height - 1));
                 let out = &mut buf[y * width + x0..y * width + x1];
                 for (i, o) in out.iter_mut().enumerate() {
                     let fx = (((x0 + i) as i64 - dx0) as u64 * step_x).min(max_fx);
                     let (sx, wx) = ((fx >> 16) as usize, (fx >> 8 & 255) as u32);
                     let sx1 = (sx + 1).min(img.width - 1);
                     *o = lerp_px(
-                        lerp_px(row0[sx], row0[sx1], wx),
-                        lerp_px(row1[sx], row1[sx1], wx),
+                        lerp_px(dot(row0, sx), dot(row0, sx1), wx),
+                        lerp_px(dot(row1, sx), dot(row1, sx1), wx),
                         wy,
                     );
                 }

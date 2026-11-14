@@ -26,5 +26,5 @@ pub use compress::{CompressStats, Preset, compress_pdf};
 pub use signature::{INK_BLACK, INK_BLUE, SignatureArt, load_signature_image, render_signature};
 pub use ocr::{OcrStats, ocr_pdf};
 pub use forms::{FieldKind, FormField};
-pub use engine::{Engine, HitQuad, LinkTarget, OutlineItem, PageImage, PageLink, render_svg};
+pub use engine::{Engine, HitQuad, LinkTarget, OutlineItem, PageImage, PageLink, PageRgb, render_svg};
 pub use worker::{DocInfo, Event, RenderKey, Request, Worker};
