@@ -2,11 +2,13 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{
-    self, Align, Color32, CornerRadius, Key, KeyboardShortcut, Layout, Modifiers, Pos2, Rect,
-    Sense, Stroke, StrokeKind, TextureHandle, TextureOptions, Vec2, ViewportCommand,
+use egui::{
+    self, Align, Color32, CornerRadius, Key, KeyboardShortcut, Layout, Modifiers, Rect,
+    Sense, Stroke, StrokeKind, Vec2, ViewportCommand,
 };
-use rogeha_core::{DocInfo, Event, HitQuad, RenderKey, Request, Worker};
+use std::sync::Arc;
+
+use rogeha_core::{DocInfo, Event, HitQuad, PageImage, RenderKey, Request, Worker};
 
 use crate::agent_host::AgentHost;
 
@@ -15,16 +17,27 @@ const PT_TO_PX: f32 = 96.0 / 72.0;
 const PAGE_GAP: f32 = 10.0;
 const MARGIN: f32 = 12.0;
 /// Upper bound for page textures kept in memory.
-const TEXTURE_BUDGET: usize = 48 << 20;
-const MAX_TEXTURE_SIDE: f32 = 8192.0;
+const TEXTURE_BUDGET: usize = 40 << 20;
+/// Largest page image we render (pixels). Higher zoom levels are upscaled from this.
+const MAX_PAGE_PIXELS: f32 = 12.0e6;
 const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 8.0;
 const ZOOM_SETTLE: Duration = Duration::from_millis(70);
 
 struct PageTex {
     key: RenderKey,
-    tex: TextureHandle,
-    bytes: usize,
+    image: Arc<PageImage>,
+}
+
+/// What the runner should draw underneath the UI this frame: the document area and its
+/// pages. Page pixels are copied straight into the window's frame buffer, so each rendered
+/// page exists in memory exactly once (no GPU texture, no second copy inside the UI library).
+pub struct PageLayer {
+    /// Document area in egui points; nothing is drawn outside it.
+    pub clip: Rect,
+    pub background: Color32,
+    /// Page rectangles in egui points, with the image if it has been rendered.
+    pub pages: Vec<(Rect, Option<Arc<PageImage>>)>,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -83,6 +96,9 @@ pub struct ReaderApp {
     zoom_changed_at: Option<Instant>,
 
     textures: HashMap<usize, PageTex>,
+    layer: PageLayer,
+    /// On-screen pages plus read-ahead; never evicted.
+    visible_pages: Vec<usize>,
     failed: HashSet<RenderKey>,
     last_want: Vec<RenderKey>,
 
@@ -112,13 +128,13 @@ pub struct ReaderApp {
 
 impl ReaderApp {
     pub fn new(
-        cc: &eframe::CreationContext<'_>,
+        ctx: &egui::Context,
         file: Option<PathBuf>,
         started: Instant,
         bench: bool,
         dev: DevOptions,
     ) -> Self {
-        let ctx = cc.egui_ctx.clone();
+        let ctx = ctx.clone();
         // Ctrl +/- zooms the document, not the whole UI.
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let wake_ctx = ctx.clone();
@@ -144,6 +160,12 @@ impl ReaderApp {
             fit: Fit::Width,
             zoom_changed_at: None,
             textures: HashMap::new(),
+            visible_pages: Vec::new(),
+            layer: PageLayer {
+                clip: Rect::NOTHING,
+                background: Color32::BLACK,
+                pages: Vec::new(),
+            },
             failed: HashSet::new(),
             last_want: Vec::new(),
             tops: Vec::new(),
@@ -440,17 +462,7 @@ impl ReaderApp {
                     if !current {
                         continue;
                     }
-                    let bytes = image.rgba.len();
-                    let color = egui::ColorImage::from_rgba_premultiplied(
-                        [image.width, image.height],
-                        &image.rgba,
-                    );
-                    let tex = ctx.load_texture(
-                        format!("page-{}", key.page),
-                        color,
-                        TextureOptions::LINEAR,
-                    );
-                    self.textures.insert(key.page, PageTex { key, tex, bytes });
+                    self.textures.insert(key.page, PageTex { key, image: Arc::new(image) });
                     self.evict_textures();
                     if self.first_page_ms.is_none() {
                         self.first_page_ms = Some(self.started.elapsed().as_secs_f64() * 1000.0);
@@ -517,7 +529,7 @@ impl ReaderApp {
     }
 
     fn evict_textures(&mut self) {
-        let mut total: usize = self.textures.values().map(|t| t.bytes).sum();
+        let mut total: usize = self.textures.values().map(|t| t.image.bytes()).sum();
         if total <= TEXTURE_BUDGET {
             return;
         }
@@ -529,11 +541,11 @@ impl ReaderApp {
             if total <= TEXTURE_BUDGET {
                 break;
             }
-            if page.abs_diff(here) <= 1 || wanted.contains(&page) {
+            if self.visible_pages.contains(&page) || wanted.contains(&page) {
                 continue;
             }
             if let Some(t) = self.textures.remove(&page) {
-                total -= t.bytes;
+                total -= t.image.bytes();
             }
         }
     }
@@ -1028,12 +1040,8 @@ impl ReaderApp {
                 let rect = Rect::from_min_size(origin + Vec2::new(x, top), Vec2::new(w, h));
                 visible.push(page);
 
-                painter.rect_filled(rect.translate(Vec2::splat(2.0)), CornerRadius::ZERO, Color32::from_black_alpha(40));
-                painter.rect_filled(rect, CornerRadius::ZERO, Color32::WHITE);
-                if let Some(t) = self.textures.get(&page) {
-                    let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-                    painter.image(t.tex.id(), rect, uv, Color32::WHITE);
-                }
+                let image = self.textures.get(&page).map(|t| t.image.clone());
+                self.layer.pages.push((rect, image));
                 painter.rect_stroke(
                     rect,
                     CornerRadius::ZERO,
@@ -1075,17 +1083,19 @@ impl ReaderApp {
         if !zoom_settled {
             ui.ctx().request_repaint_after(ZOOM_SETTLE);
         }
+        // Pages to have ready: what is on screen plus the next page. The same set is what the
+        // cache refuses to evict, so a page is never dropped and then asked for again.
         let mut pages = visible.clone();
-        if let (Some(&first), Some(&last)) = (visible.first(), visible.last()) {
-            pages.extend([last + 1].into_iter().filter(|&p| p < n));
-            if first > 0 {
-                pages.push(first - 1);
+        if let Some(&last) = visible.last() {
+            if last + 1 < n {
+                pages.push(last + 1);
             }
         }
+        self.visible_pages.clone_from(&pages);
         let mut want = Vec::new();
         for page in pages {
             let (w, h) = doc.page_sizes[page];
-            let s = (scale * ppp).min(MAX_TEXTURE_SIDE / w.max(h));
+            let s = (scale * ppp).min((MAX_PAGE_PIXELS / (w * h)).sqrt());
             let key = RenderKey {
                 page,
                 scale_milli: (s * 1000.0).round().max(1.0) as u32,
@@ -1202,14 +1212,20 @@ impl ReaderApp {
             self.page_count(),
             working_set as f64 / 1048576.0,
             private as f64 / 1048576.0,
-            self.textures.values().map(|t| t.bytes).sum::<usize>() as f64 / 1048576.0,
+            self.textures.values().map(|t| t.image.bytes()).sum::<usize>() as f64 / 1048576.0,
         );
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 }
 
-impl eframe::App for ReaderApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+impl ReaderApp {
+    /// The document area to draw under the UI, as recorded by the last [`Self::ui`] call.
+    pub fn page_layer(&self) -> &PageLayer {
+        &self.layer
+    }
+
+    /// One frame of UI. Called by the runner whenever a repaint is needed.
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.drain_events(&ctx);
         self.handle_input(&ctx);
@@ -1225,14 +1241,17 @@ impl eframe::App for ReaderApp {
                 .default_size(320.0)
                 .show(ui, |ui| self.ai_panel(ui));
         }
-        let bg = if ui.visuals().dark_mode {
+        self.layer.pages.clear();
+        self.layer.background = if ui.visuals().dark_mode {
             Color32::from_gray(48)
         } else {
             Color32::from_gray(200)
         };
+        // No fill here: the runner paints the background and the pages under the UI.
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(bg))
+            .frame(egui::Frame::new())
             .show(ui, |ui| {
+                self.layer.clip = ui.max_rect();
                 if self.doc.is_some() {
                     self.document_view(ui);
                 } else {

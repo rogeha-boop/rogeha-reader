@@ -26,11 +26,42 @@ impl Doc {
     }
 }
 
-/// A rendered page: tightly packed RGBA8, `width * height * 4` bytes.
+/// This thread's raw MuPDF context.
+///
+/// The safe wrapper keeps the pointer private, so we read it out of its one-field
+/// `Context` struct. The compile-time check below fails if that struct ever changes size.
+fn raw_context() -> *mut mupdf_sys::fz_context {
+    const _: () = assert!(
+        std::mem::size_of::<mupdf::Context>() == std::mem::size_of::<*mut mupdf_sys::fz_context>()
+    );
+    // SAFETY: `mupdf::Context` is a struct with a single `*mut fz_context` field.
+    unsafe { std::mem::transmute::<mupdf::Context, *mut mupdf_sys::fz_context>(mupdf::Context::get()) }
+}
+
+/// Free MuPDF's cache of decoded images and other page resources.
+///
+/// MuPDF keeps up to 256 MB of these to speed up re-rendering. The reader already keeps
+/// the rendered pages it needs, so once rendering goes idle this cache is just memory.
+/// Call on the document thread.
+pub fn release_render_cache() {
+    // SAFETY: valid context for this thread; shrinking the store is always allowed.
+    unsafe {
+        mupdf_sys::fz_shrink_store(raw_context(), 0);
+    }
+}
+
+/// A rendered page: one `u32` per pixel as `0x00RRGGBB`, row by row.
+/// This is exactly the format the window's frame buffer uses, so drawing a page is a row copy.
 pub struct PageImage {
     pub width: usize,
     pub height: usize,
-    pub rgba: Vec<u8>,
+    pub pixels: Vec<u32>,
+}
+
+impl PageImage {
+    pub fn bytes(&self) -> usize {
+        self.pixels.len() * 4
+    }
 }
 
 /// A search hit as a quad in page points: [ul, ur, ll, lr] as (x, y).
@@ -113,7 +144,7 @@ impl Engine {
             .unwrap_or_default()
     }
 
-    /// Render a page at `scale` (1.0 = 72 dpi) plus an extra view-only rotation in degrees.
+    /// Render a page at `scale` (1.0 = 72 dpi).
     pub fn render(&self, page: usize, scale: f32) -> Result<PageImage> {
         let p = self.doc.base().load_page(page as i32).map_err(err)?;
         let ctm = Matrix::new_scale(scale, scale);
@@ -127,17 +158,15 @@ impl Engine {
         if n < 3 || samples.len() < stride * h {
             return Err("Unexpected pixmap format".into());
         }
-        let mut rgba = vec![255u8; w * h * 4];
+        let mut pixels = Vec::with_capacity(w * h);
         for y in 0..h {
             let row = &samples[y * stride..y * stride + w * n];
-            let out = &mut rgba[y * w * 4..(y + 1) * w * 4];
-            for (src, dst) in row.chunks_exact(n).zip(out.chunks_exact_mut(4)) {
-                dst[0] = src[0];
-                dst[1] = src[1];
-                dst[2] = src[2];
-            }
+            pixels.extend(
+                row.chunks_exact(n)
+                    .map(|p| (p[0] as u32) << 16 | (p[1] as u32) << 8 | p[2] as u32),
+            );
         }
-        Ok(PageImage { width: w, height: h, rgba })
+        Ok(PageImage { width: w, height: h, pixels })
     }
 
     pub fn page_text(&self, page: usize) -> Result<String> {

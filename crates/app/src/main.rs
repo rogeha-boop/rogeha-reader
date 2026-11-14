@@ -3,11 +3,12 @@
 
 mod agent_host;
 mod app;
+mod runner;
 
 use std::path::PathBuf;
 use std::time::Instant;
 
-fn main() -> eframe::Result {
+fn main() {
     let started = Instant::now();
 
     let mut file: Option<PathBuf> = None;
@@ -28,18 +29,21 @@ fn main() -> eframe::Result {
         }
     }
 
-    let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("Rogeha Reader")
-            .with_inner_size([1100.0, 820.0])
-            .with_min_inner_size([420.0, 300.0])
-            .with_drag_and_drop(true),
-        ..Default::default()
-    };
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("Rogeha Reader")
+        .with_inner_size([1100.0, 820.0])
+        .with_min_inner_size([420.0, 300.0])
+        .with_drag_and_drop(true);
 
-    eframe::run_native(
-        "Rogeha Reader",
-        options,
-        Box::new(move |cc| Ok(Box::new(app::ReaderApp::new(cc, file, started, bench, dev)))),
-    )
+    let result = runner::run(viewport, move |ctx| {
+        app::ReaderApp::new(ctx, file, started, bench, dev)
+    });
+    if let Err(message) = result {
+        rfd::MessageDialog::new()
+            .set_title("Rogeha Reader")
+            .set_description(format!("Rogeha Reader could not start:
+{message}"))
+            .show();
+        std::process::exit(1);
+    }
 }

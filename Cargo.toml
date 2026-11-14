@@ -11,6 +11,9 @@ license = "AGPL-3.0-or-later"
 [workspace.dependencies]
 mupdf = { version = "0.8.0", default-features = false, features = ["js", "xps", "svg", "cbz", "img", "html", "epub", "tesseract", "brotli", "docx-output", "base14-fonts"] }
 
+# Raw FFI, for the few MuPDF calls the safe wrapper does not expose. Same build as `mupdf` uses.
+mupdf-sys = { version = "0.8.0", default-features = false }
+
 [profile.release]
 opt-level = 3
 lto = "thin"

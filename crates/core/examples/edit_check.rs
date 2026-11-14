@@ -30,8 +30,8 @@ fn main() {
     // sub-pixel anti-aliasing differences in small text don't count.
     let (bw, bh) = (before.width, before.height);
     let gray = |img: &rogeha_core::PageImage, x: usize, y: usize| -> u32 {
-        let p = &img.rgba[(y * img.width + x) * 4..][..3];
-        (p[0] as u32 + p[1] as u32 + p[2] as u32) / 3
+        let p = img.pixels[y * img.width + x];
+        ((p >> 16 & 255) + (p >> 8 & 255) + (p & 255)) / 3
     };
     let (mut blocks, mut differing) = (0usize, 0usize);
     for by in (0..after.height.saturating_sub(4)).step_by(4) {

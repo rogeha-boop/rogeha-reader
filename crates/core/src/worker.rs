@@ -99,9 +99,13 @@ fn run(rx: Receiver<Request>, etx: Sender<Event>, wake: impl Fn()) {
         ok
     };
 
+    let mut rendered_since_idle = false;
     loop {
         // Block only when there is nothing left to render.
         let first = if st.queue.is_empty() {
+            if std::mem::take(&mut rendered_since_idle) {
+                crate::engine::release_render_cache();
+            }
             match rx.recv() {
                 Ok(r) => Some(r),
                 Err(_) => return,
@@ -126,6 +130,7 @@ fn run(rx: Receiver<Request>, etx: Sender<Event>, wake: impl Fn()) {
             continue;
         }
         let Some(engine) = &st.engine else { continue };
+        rendered_since_idle = true;
         match engine.render(key.page, key.scale_milli as f32 / 1000.0) {
             Ok(image) => {
                 if !emit(Event::Rendered { key, image }) {

@@ -50,9 +50,9 @@ fn opens_and_renders() {
 
     let img = engine.render(1, 2.0).unwrap();
     assert_eq!((img.width, img.height), (600, 800));
-    assert_eq!(img.rgba.len(), 600 * 800 * 4);
-    // A blank page renders white and fully opaque.
-    assert!(img.rgba.chunks_exact(4).all(|p| p == [255, 255, 255, 255]));
+    assert_eq!(img.pixels.len(), 600 * 800);
+    // A blank page renders white.
+    assert!(img.pixels.iter().all(|&p| p == 0x00FF_FFFF));
     drop(engine);
     std::fs::remove_file(path).unwrap();
 }
