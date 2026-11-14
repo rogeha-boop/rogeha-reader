@@ -282,6 +282,98 @@ fn scan_fixture(name: &str) -> PathBuf {
     scan
 }
 
+/// A file as a design program writes it for a print shop: little to see, but a large colour
+/// profile of the press, the program's private data, and metadata on the page.
+fn print_shop_fixture(name: &str, pdf_a: bool) -> PathBuf {
+    let path = text_fixture(name);
+    let mut doc = PdfDocument::open(path.to_str().unwrap()).unwrap();
+    // Bytes that do not compress, standing in for a colour profile.
+    let mut seed = 7u32;
+    let noise: Vec<u8> = (0..200_000)
+        .map(|_| {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            (seed >> 24) as u8
+        })
+        .collect();
+    let stream = |doc: &mut PdfDocument, bytes: &[u8]| {
+        let dict = doc.new_dict().unwrap();
+        doc.add_stream(&mupdf::Buffer::from_bytes(bytes).unwrap(), Some(&dict), false).unwrap()
+    };
+    let profile = stream(&mut doc, &noise);
+    let private = stream(&mut doc, &noise[..50_000]);
+    let page_metadata = stream(&mut doc, &noise[50_000..90_000]);
+    let own = if pdf_a { "<x:xmpmeta><pdfaid:part>2</pdfaid:part></x:xmpmeta>" } else { "<x:xmpmeta>mine</x:xmpmeta>" };
+    let document_metadata = stream(&mut doc, own.as_bytes());
+
+    let mut intent = doc.new_dict().unwrap();
+    intent.dict_put("S", doc.new_name("GTS_PDFX").unwrap()).unwrap();
+    intent.dict_put("DestOutputProfile", profile).unwrap();
+    let mut intents = doc.new_array().unwrap();
+    intents.array_push(intent).unwrap();
+    let mut catalog = doc.catalog().unwrap();
+    catalog.dict_put("OutputIntents", intents).unwrap();
+    catalog.dict_put("Metadata", document_metadata).unwrap();
+    let mut page = doc.find_page(0).unwrap();
+    page.dict_put("PieceInfo", private).unwrap();
+    page.dict_put("Metadata", page_metadata).unwrap();
+
+    let out = path.with_extension("print.pdf");
+    doc.save(out.to_str().unwrap()).unwrap();
+    drop(doc);
+    std::fs::remove_file(path).unwrap();
+    out
+}
+
+#[test]
+fn compressing_takes_out_what_no_reader_shows() {
+    let source = print_shop_fixture("compress-print", false);
+    let before = std::fs::metadata(&source).unwrap().len();
+    assert!(before > 280_000, "the fixture carries its extras: {before}");
+    let text = Engine::open(&source).unwrap().page_text(0).unwrap();
+
+    // Smallest: the press profile, the private data and the page's metadata go.
+    let small = source.with_extension("small.pdf");
+    let stats = compress_pdf(&source, &small, Preset::Small).unwrap();
+    assert!(stats.bytes_after < 20_000, "expected the extras gone, got {} bytes", stats.bytes_after);
+    assert_eq!(stats.picture_bytes, 0, "the file has no pictures");
+    let doc = PdfDocument::open(small.to_str().unwrap()).unwrap();
+    let catalog = doc.catalog().unwrap();
+    assert!(catalog.get_dict("OutputIntents").unwrap().is_none());
+    assert!(catalog.get_dict("Metadata").unwrap().is_some(), "the document's own metadata stays");
+    let page = doc.find_page(0).unwrap();
+    assert!(page.get_dict("PieceInfo").unwrap().is_none());
+    assert!(page.get_dict("Metadata").unwrap().is_none());
+    drop(doc);
+    assert_eq!(Engine::open(&small).unwrap().page_text(0).unwrap(), text, "what is shown stays the same");
+
+    // The other settings keep the press profile, so colours stay exactly as they were, and
+    // still take out the rest.
+    let high = source.with_extension("balanced.pdf");
+    let stats = compress_pdf(&source, &high, Preset::Balanced).unwrap();
+    assert!(stats.bytes_after > 190_000 && stats.bytes_after < before - 80_000, "got {} bytes", stats.bytes_after);
+    let doc = PdfDocument::open(high.to_str().unwrap()).unwrap();
+    assert!(doc.catalog().unwrap().get_dict("OutputIntents").unwrap().is_some());
+    drop(doc);
+
+    for path in [source, small, high] {
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn an_archive_copy_keeps_its_colour_profile() {
+    // PDF/A files must carry their output intent, at every setting.
+    let source = print_shop_fixture("compress-pdfa", true);
+    let small = source.with_extension("archive-small.pdf");
+    compress_pdf(&source, &small, Preset::Small).unwrap();
+    let doc = PdfDocument::open(small.to_str().unwrap()).unwrap();
+    assert!(doc.catalog().unwrap().get_dict("OutputIntents").unwrap().is_some());
+    drop(doc);
+    for path in [source, small] {
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
 #[test]
 fn compressing_a_scan_shrinks_it_and_keeps_it_readable() {
     let scan = scan_fixture("compress");
@@ -289,6 +381,7 @@ fn compressing_a_scan_shrinks_it_and_keeps_it_readable() {
     let stats = compress_pdf(&scan, &out, Preset::Balanced).unwrap();
     assert_eq!(stats.pages, 1);
     assert!(!stats.images_untouched);
+    assert!(stats.picture_bytes * 10 > stats.bytes_before * 9, "a scan is nearly all picture: {} of {}", stats.picture_bytes, stats.bytes_before);
     assert!(
         stats.bytes_after * 3 < stats.bytes_before,
         "expected at least 3x smaller, got {} -> {}",

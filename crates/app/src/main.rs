@@ -108,6 +108,7 @@ fn compress_helper(args: &[std::ffi::OsString]) -> i32 {
                     "pages": stats.pages,
                     "pages_restored": stats.pages_restored,
                     "images_untouched": stats.images_untouched,
+                    "picture_bytes": stats.picture_bytes,
                 })
             );
             0

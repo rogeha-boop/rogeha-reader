@@ -10,7 +10,7 @@ use rogeha_core::Preset;
 use super::ReaderApp;
 
 pub(super) enum Outcome {
-    Done { before: u64, after: u64, restored: u64, images_untouched: bool, output: PathBuf },
+    Done { before: u64, after: u64, restored: u64, images_untouched: bool, pictures: u64, output: PathBuf },
     Failed(String),
 }
 
@@ -67,6 +67,7 @@ fn run_helper(input: PathBuf, output: PathBuf, preset: Preset) -> Outcome {
         after: v["after"].as_u64().unwrap_or(0),
         restored: v["pages_restored"].as_u64().unwrap_or(0),
         images_untouched: v["images_untouched"].as_bool().unwrap_or(false),
+        pictures: v["picture_bytes"].as_u64().unwrap_or(0),
         output,
     }
 }
@@ -134,7 +135,8 @@ impl ReaderApp {
             .default_pos(self.layer.clip.min + egui::Vec2::new(40.0, 30.0))
             .show(ctx, |ui| {
                 ui.set_width(380.0);
-                ui.label("Makes scanned PDFs smaller by storing their page images more efficiently. Text, comments and black-and-white pages are kept exactly. You get a new file; the original is not changed.");
+                ui.label("Makes a PDF smaller: pictures are stored more efficiently, and data that no reader shows is taken out. Text, comments and black-and-white pages are kept exactly. You get a new file; the original is not changed.");
+                ui.label(egui::RichText::new("The three settings differ only in how pictures are stored. A file that is mostly text and drawings comes out about the same size with each.").weak().small());
                 if let Some(size) = size {
                     ui.label(egui::RichText::new(format!("Current size: {}", megabytes(size))).weak());
                 }
@@ -160,7 +162,7 @@ impl ReaderApp {
                     start = true;
                 }
                 match &self.compress.outcome {
-                    Some(Outcome::Done { before, after, restored, images_untouched, output }) => {
+                    Some(Outcome::Done { before, after, restored, images_untouched, pictures, output }) => {
                         ui.separator();
                         let saved = if *before > 0 { 100.0 - *after as f64 * 100.0 / *before as f64 } else { 0.0 };
                         if saved >= 1.0 {
@@ -171,6 +173,13 @@ impl ReaderApp {
                             )).strong());
                         } else {
                             ui.label(egui::RichText::new("This file is already compact; the copy is not smaller.").strong());
+                        }
+                        // Say why the setting made little difference, when it did.
+                        let share = if *before > 0 { *pictures as f64 * 100.0 / *before as f64 } else { 0.0 };
+                        if share < 25.0 {
+                            ui.label(format!(
+                                "Pictures were only {share:.0}% of this file; the rest is text, drawings and fonts. The other settings would give about the same size."
+                            ));
                         }
                         if *images_untouched {
                             ui.label("To be safe, the images were left as they are: re-encoding them would have changed other content in this file.");

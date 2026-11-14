@@ -9,6 +9,13 @@
 //! * an image is only replaced when the new version is actually smaller;
 //! * text, vector graphics, fonts, comments and bookmarks are left as they are.
 //!
+//! The resolution settings only matter for pictures. Many PDFs are big for another reason:
+//! they carry data no reader shows. A file made for a print shop can hold a 1.5 MB colour
+//! profile of the printing press and a copy of its metadata on every picture; design programs
+//! leave their own working data in the file. That is taken out as well (see [`strip_extras`]),
+//! and [`CompressStats::picture_bytes`] tells the reader how much of the file was pictures, so
+//! it can say why the settings made little difference when they did.
+//!
 //! The result always goes to a **new file**; the original is never touched.
 //!
 //! Safety net: MuPDF's rewriter re-writes each page's drawing instructions, and on some PDFs
@@ -39,7 +46,8 @@ pub enum Preset {
     HighQuality,
     /// Keeps up to 200 dpi, JPEG quality 75. Looks the same on screen; the default.
     Balanced,
-    /// Keeps up to 144 dpi, JPEG quality 60. Smallest; fine print may soften.
+    /// Keeps up to 144 dpi, JPEG quality 60, and drops the print colour profile. Smallest;
+    /// fine print may soften.
     Small,
 }
 
@@ -70,8 +78,15 @@ impl Preset {
         match self {
             Preset::HighQuality => "Up to 300 dpi. For printing and archiving.",
             Preset::Balanced => "Up to 200 dpi. Looks the same on screen. Recommended.",
-            Preset::Small => "Up to 144 dpi. Smallest; very fine print may soften.",
+            Preset::Small => "Up to 144 dpi. Smallest; very fine print may soften, and print colours may shift a shade.",
         }
+    }
+
+    /// Is the colour profile of the printing press (the PDF's "output intent") kept?
+    /// Without it, colours given in printing inks come out a shade different (measured on a
+    /// brand red: 227, 0, 14 became 237, 28, 36). Only the smallest preset accepts that.
+    fn keeps_print_profile(self) -> bool {
+        self != Preset::Small
     }
 
     /// (target dpi, JPEG quality)
@@ -93,6 +108,9 @@ pub struct CompressStats {
     pub pages_restored: usize,
     /// True when the images were left alone entirely (only lossless tidying was done).
     pub images_untouched: bool,
+    /// How many bytes of the original file were pictures. The resolution settings change
+    /// only these.
+    pub picture_bytes: u64,
 }
 
 impl CompressStats {
@@ -203,6 +221,7 @@ fn raw_pass(input: &Path, output: &Path, preset: Preset, rewrite_images: bool) -
         w.do_compress_images = 1;
         w.do_compress_fonts = 1;
         w.do_use_objstms = 1;
+        w.compression_effort = 100; // pack text and drawings as tightly as zlib can
         let mut e = ptr::null_mut();
         sys::mupdf_pdf_save_document(ctx, pdf, c_out.as_ptr(), w, &mut e);
         let failed = take_error(e);
@@ -226,32 +245,40 @@ pub fn compress_pdf(input: &Path, output: &Path, preset: Preset) -> Result<Compr
         name.push(tag);
         std::path::PathBuf::from(name)
     };
-    let (step1, step2) = (temp(".rr-1"), temp(".rr-2"));
+    let temps = [temp(".rr-1"), temp(".rr-2"), temp(".rr-3")];
+    let candidate = temp(".rr-4");
     let cleanup = || {
-        let _ = std::fs::remove_file(&step1);
-        let _ = std::fs::remove_file(&step2);
+        for file in temps.iter().chain([&candidate]) {
+            let _ = std::fs::remove_file(file);
+        }
     };
+    let size = |p: &Path| std::fs::metadata(p).map(|m| m.len()).unwrap_or(u64::MAX);
 
-    let run = || -> Result<(usize, usize, bool)> {
-        // 1. Re-encode images.
-        let pages = raw_pass(input, &step1, preset, true)?;
-        // 2. Check every page; put back the content of pages that changed beyond their images.
-        match restore_changed_pages(input, &step1, &step2)? {
-            Some(restored) => {
-                // 3. Final tidy write (object streams, duplicate removal).
-                raw_pass(&step2, output, preset, false)?;
-                Ok((pages, restored, false))
-            }
-            None => {
-                // Could not get an exact match: do not risk it, keep the images as they are.
-                raw_pass(input, output, preset, false)?;
-                Ok((pages, 0, true))
+    let run = || -> Result<(Outcome, u64)> {
+        let picture_bytes = picture_bytes(input)?;
+        let mut best = build(input, output, Some(preset), preset, &temps)?;
+        // Re-encoding a picture has side costs that MuPDF's own "only when smaller" check does
+        // not see: the page's drawing instructions are written anew, and a picture in printing
+        // inks gets a colour profile of its own (139 KB in one print-shop file, to save 19 KB of
+        // picture). Where pictures are a small part of the file such costs can outweigh the
+        // saving, so there the gentler settings and "pictures left alone" are tried as well and
+        // the smallest result is kept. A stronger setting then never gives a larger file. (Where
+        // pictures are most of the file this cannot happen, and trying would only cost time.)
+        if picture_bytes * 4 < bytes_before {
+            let gentler = Preset::ALL.into_iter().take_while(|p| *p != preset).map(Some);
+            for images in gentler.chain([None]) {
+                let outcome = build(input, &candidate, images, preset, &temps)?;
+                if size(&candidate) < size(output) {
+                    std::fs::copy(&candidate, output).map_err(|e| e.to_string())?;
+                    best = outcome;
+                }
             }
         }
+        Ok((best, picture_bytes))
     };
     let result = run();
     cleanup();
-    let (pages, pages_restored, images_untouched) = match result {
+    let (outcome, picture_bytes) = match result {
         Ok(r) => r,
         Err(e) => {
             let _ = std::fs::remove_file(output);
@@ -259,7 +286,126 @@ pub fn compress_pdf(input: &Path, output: &Path, preset: Preset) -> Result<Compr
         }
     };
     let bytes_after = std::fs::metadata(output).map_err(|e| e.to_string())?.len();
-    Ok(CompressStats { bytes_before, bytes_after, pages, pages_restored, images_untouched })
+    Ok(CompressStats {
+        bytes_before,
+        bytes_after,
+        pages: outcome.pages,
+        pages_restored: outcome.pages_restored,
+        images_untouched: outcome.images_untouched,
+        picture_bytes,
+    })
+}
+
+/// What one way of building the compressed file did.
+struct Outcome {
+    pages: usize,
+    pages_restored: usize,
+    /// The pictures had to be left alone to keep the text exact.
+    images_untouched: bool,
+}
+
+/// Build one compressed copy of `input` at `output`: pictures re-encoded as `images` says
+/// (`None` leaves them alone), unseen data taken out as `preset` says. `temps` are three
+/// scratch files.
+fn build(input: &Path, output: &Path, images: Option<Preset>, preset: Preset, temps: &[std::path::PathBuf; 3]) -> Result<Outcome> {
+    let [step1, step2, step3] = temps;
+    let Some(images) = images else {
+        strip_extras(input, step3, preset)?;
+        let pages = raw_pass(step3, output, preset, false)?;
+        return Ok(Outcome { pages, pages_restored: 0, images_untouched: false });
+    };
+    // 1. Re-encode images.
+    let pages = raw_pass(input, step1, images, true)?;
+    // 2. Check every page; put back the content of pages that changed beyond their images.
+    match restore_changed_pages(input, step1, step2)? {
+        Some(pages_restored) => {
+            // 3. Take out what no reader shows.
+            strip_extras(step2, step3, preset)?;
+            // 4. Final tidy write (object streams, duplicate removal).
+            raw_pass(step3, output, preset, false)?;
+            Ok(Outcome { pages, pages_restored, images_untouched: false })
+        }
+        None => {
+            // Could not get an exact match: do not risk it, keep the images as they are.
+            strip_extras(input, step3, preset)?;
+            raw_pass(step3, output, preset, false)?;
+            Ok(Outcome { pages, pages_restored: 0, images_untouched: true })
+        }
+    }
+}
+
+/// Every object of the document that is a dictionary (streams included): its number, the
+/// reference to it (a stream's data is read through the reference) and the dictionary itself.
+fn dictionaries(doc: &PdfDocument) -> Result<Vec<(i32, mupdf::pdf::PdfObject, mupdf::pdf::PdfObject)>> {
+    let count = doc.count_objects().map_err(err)? as i32;
+    let mut found = Vec::new();
+    for number in 1..count {
+        // A number that is free or cannot be read is simply not a dictionary.
+        let Ok(reference) = doc.new_indirect(number, 0) else { continue };
+        let Ok(Some(object)) = reference.resolve() else { continue };
+        if object.is_dict().unwrap_or(false) {
+            found.push((number, reference, object));
+        }
+    }
+    Ok(found)
+}
+
+fn name_is(object: &mupdf::pdf::PdfObject, key: &str, name: &str) -> bool {
+    matches!(object.get_dict(key), Ok(Some(value)) if value.as_name().is_ok_and(|n| n == name.as_bytes()))
+}
+
+/// How many bytes of the file are pictures, as they are stored.
+fn picture_bytes(input: &Path) -> Result<u64> {
+    let doc = PdfDocument::open(input.to_str().ok_or("File path is not valid Unicode")?).map_err(err)?;
+    let mut total = 0;
+    for (_, reference, object) in dictionaries(&doc)? {
+        if name_is(&object, "Subtype", "Image") {
+            total += reference.read_raw_stream().map(|bytes| bytes.len() as u64).unwrap_or(0);
+        }
+    }
+    Ok(total)
+}
+
+/// Take out data that no reader shows, and write the result to `target`:
+///
+/// * `/Metadata` on anything but the document itself: design programs attach a copy of a
+///   picture's or a page's metadata to each of them (the document's own stays);
+/// * `/PieceInfo`: the private working data of the program that made the file;
+/// * `/Thumb`: page thumbnails, which readers draw themselves;
+/// * `/OutputIntents`: the colour profile of the printing press, often the largest object in a
+///   file made for a print shop. Only the smallest preset takes it out, because colours shift
+///   a shade without it, and never from PDF/A files, which are archive copies and must carry it.
+///
+/// Whatever these pointed at is dropped when the file is written, unless something that is
+/// shown uses it too.
+fn strip_extras(source: &Path, target: &Path, preset: Preset) -> Result<()> {
+    let path = |p: &Path| p.to_str().map(str::to_owned).ok_or("File path is not valid Unicode");
+    let doc = PdfDocument::open(path(source)?.as_str()).map_err(err)?;
+    let mut catalog = doc.catalog().map_err(err)?;
+    let catalog_number = doc.trailer().ok().and_then(|t| t.get_dict("Root").ok().flatten()).and_then(|r| r.as_indirect().ok());
+    for (number, _, mut object) in dictionaries(&doc)? {
+        let mut unseen = vec!["PieceInfo", "Thumb"];
+        if Some(number) != catalog_number {
+            unseen.push("Metadata");
+        }
+        for key in unseen {
+            if matches!(object.get_dict(key), Ok(Some(_))) {
+                object.dict_delete(key).map_err(err)?;
+            }
+        }
+    }
+    if !preset.keeps_print_profile() && !is_pdf_a(&catalog) && matches!(catalog.get_dict("OutputIntents"), Ok(Some(_))) {
+        catalog.dict_delete("OutputIntents").map_err(err)?;
+    }
+    let mut options = PdfWriteOptions::default();
+    options.set_garbage_level(3).set_compress(true);
+    doc.save_with_options(path(target)?.as_str(), options).map_err(err)
+}
+
+/// Does the document say it is a PDF/A archive copy? (Its metadata then names the PDF/A part.)
+fn is_pdf_a(catalog: &mupdf::pdf::PdfObject) -> bool {
+    let Ok(Some(metadata)) = catalog.get_dict("Metadata") else { return false };
+    metadata.read_stream().is_ok_and(|xml| xml.windows(7).any(|w| w == b"pdfaid:"))
 }
 
 /// Compare each page of `compressed` with `original`. Pages whose text or vector content
