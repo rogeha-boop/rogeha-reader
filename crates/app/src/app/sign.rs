@@ -453,6 +453,14 @@ impl ReaderApp {
         }
     }
 
+    /// The most recently saved signature (art, shape, ink), for the assistant.
+    pub(super) fn first_saved_signature(&mut self) -> Option<(SignatureArt, f32, [u8; 3])> {
+        if !std::mem::replace(&mut self.sign.saved_loaded, true) {
+            self.sign.saved = load_saved();
+        }
+        self.sign.saved.first().map(|s| (s.art.clone(), s.aspect, s.ink))
+    }
+
     // --------------------------------------------------------------- placing on a page
 
     /// Mouse handling while a signature is being placed. Replaces text selection.

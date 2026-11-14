@@ -54,6 +54,10 @@ pub enum Request {
     DeleteAnnotation { page: usize, xref: i32 },
     /// Stamp a visual signature; `rect` is (x0, y0, x1, y1) in displayed page points.
     StampSignature { page: usize, rect: (f32, f32, f32, f32), art: SignatureArt, ink: [u8; 3] },
+    /// Text of a range of pages (0-based, inclusive), for the assistant.
+    PagesText { from: usize, to: usize },
+    /// Highlight every occurrence of a text on a page.
+    HighlightText { page: usize, text: String, author: String, comment: String },
     /// Send the document's form fields now, and again after every change.
     ListFields,
     /// Type into a text field or choose a dropdown / list option.
@@ -81,6 +85,8 @@ pub enum Event {
     Annotations { generation: u64, list: Vec<AnnotInfo> },
     /// A comment was just created (so the GUI can select it).
     AnnotationAdded { page: usize, xref: i32 },
+    /// Answer to [`Request::PagesText`]: the text, or why it could not be read.
+    PagesText(Result<String, String>),
     /// The document's form fields, for the given document generation.
     Fields { generation: u64, list: Vec<FormField> },
     /// The document's digital signatures, checked, for the given document generation.
@@ -341,6 +347,19 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
         }
         Request::StampSignature { page, rect, art, ink } => {
             edit!(|e: &mut Engine| e.stamp_signature(page, rect, &art, ink))
+        }
+        Request::PagesText { from, to } => {
+            let Some(engine) = &st.engine else { return emit(Event::PagesText(Err("No document is open".into()))) };
+            let result = engine.pages_text(from, to, 60_000).map(|(mut text, last)| {
+                if last < to {
+                    text.push_str(&format!("(Stopped after page {}. Call again from page {} for more.)\n", last + 1, last + 2));
+                }
+                text
+            });
+            emit(Event::PagesText(result))
+        }
+        Request::HighlightText { page, text, author, comment } => {
+            edit!(|e: &mut Engine| e.highlight_text(page, &text, &author, &comment))
         }
         Request::ListFields => {
             st.wants_fields = true;

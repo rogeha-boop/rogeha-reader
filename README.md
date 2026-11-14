@@ -4,8 +4,8 @@ A fast, free, open-source PDF and EPUB reader for Windows, written in Rust on th
 [MuPDF](https://mupdf.com) engine. Native GUI (egui) drawn on the CPU: no Electron, no web view,
 no GPU driver.
 
-**Status: early version.** Viewing, page editing, comments, forms, compression, OCR and signing work;
-translation and the AI assistant are planned (see [PLAN.md](PLAN.md)).
+**Status: early version.** Viewing, page editing, comments, forms, compression, OCR, signing and the
+AI assistant work; offline translation is planned (see [PLAN.md](PLAN.md)).
 
 ## What works today
 
@@ -31,7 +31,11 @@ translation and the AI assistant are planned (see [PLAN.md](PLAN.md)).
 - Select and copy text (drag, then Copy or Ctrl+C)
 - Text search with highlighted matches
 - Drag and drop, open from the command line (`rogeha-reader file.pdf`)
-- AI panel that starts a separate helper process only when you open it (the assistant itself is not implemented yet)
+- **AI assistant** (the "AI" button): ask questions and get answers with links to the pages they come from,
+  summarize, explain or translate a page, and have it act on the document ("rotate all landscape pages",
+  "highlight every mention of the deadline"). You bring your own provider: a Claude API key, or any
+  OpenAI-compatible service, or a local model. It runs as a separate program that starts only when you open
+  the panel, so reading stays fast
 
 ## Look
 
@@ -52,6 +56,14 @@ The Rogeha Studio name, banner and app icon are the studio's brand and are not c
 | R / Shift+R | Rotate the current page right / left |
 | Ctrl+F, Enter, F3 / Shift+F3 | Find, next / previous match |
 
+## The assistant and your data
+
+The assistant only sees what it reads: the text of the pages it asks for, your question, and any text you
+have selected. That text is sent to the provider you choose in its settings (Anthropic, another service, or
+a model on your own computer). Nothing is sent unless you use the assistant. Your API key is stored in the
+Windows Credential Manager. Changes the assistant makes are not written to the file until you save, and
+deleting pages always asks you first.
+
 ## Building (Windows)
 
 You need:
@@ -64,7 +76,8 @@ You need:
 
 ```
 cargo build --release
-cargo test --release -p rogeha-core
+cargo test --release
+python crates/agent/tests/check_agent.py target/release/rogeha-agent.exe   # assistant, against a local mock
 ```
 
 The first build compiles MuPDF and its bundled libraries from source and takes several minutes.

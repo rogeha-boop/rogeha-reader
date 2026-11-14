@@ -48,6 +48,7 @@ fn run_helper(input: PathBuf, output: PathBuf, preset: Preset) -> Outcome {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
+    crate::agent_host::keep_files_out_of_helpers();
     let result = match cmd.output() {
         Ok(out) => out,
         Err(e) => return Outcome::Failed(format!("Could not start the compressor: {e}")),

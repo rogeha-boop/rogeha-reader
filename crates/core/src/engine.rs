@@ -192,6 +192,27 @@ impl Engine {
         tp.to_text().map_err(err)
     }
 
+    /// The text of pages `from..=to` (0-based), each introduced by `=== Page N ===`.
+    /// Stops before `max_chars` is exceeded; returns the text and the last page included.
+    pub fn pages_text(&self, from: usize, to: usize, max_chars: usize) -> Result<(String, usize)> {
+        if from > to || to >= self.page_count() {
+            return Err(format!("Pages {}-{} are not in this document (it has {} pages)", from + 1, to + 1, self.page_count()));
+        }
+        let mut out = String::new();
+        let mut last = from;
+        for page in from..=to {
+            let text = self.page_text(page).unwrap_or_default();
+            let text = text.trim();
+            let body = if text.is_empty() { "(no text on this page; it may be a scan or a picture)" } else { text };
+            if page > from && out.len() + body.len() > max_chars {
+                break;
+            }
+            out.push_str(&format!("=== Page {} ===\n{body}\n\n", page + 1));
+            last = page;
+        }
+        Ok((out, last))
+    }
+
     pub fn search_page(&self, page: usize, needle: &str) -> Result<Vec<HitQuad>> {
         let p = self.doc.base().load_page(page as i32).map_err(err)?;
         let tp = p.to_text_page(TextPageFlags::empty()).map_err(err)?;

@@ -690,3 +690,21 @@ fn forms_can_be_filled_and_saved() {
     assert!(Engine::open(&plain).unwrap().form_fields().is_empty());
     std::fs::remove_file(plain).unwrap();
 }
+
+#[test]
+fn reading_pages_and_highlighting_by_text() {
+    let path = text_fixture("assistant-tools");
+    let mut engine = Engine::open(&path).unwrap();
+    let (text, last) = engine.pages_text(0, 0, 60_000).unwrap();
+    assert_eq!((text.trim(), last), ("=== Page 1 ===\nHello annotated world", 0));
+    assert!(engine.pages_text(0, 5, 60_000).is_err());
+    assert!(engine.pages_text(1, 0, 60_000).is_err());
+
+    assert_eq!(engine.highlight_text(0, "annotated", "Assistant", "Key term").unwrap(), 1);
+    assert!(engine.highlight_text(0, "missing words", "Assistant", "").is_err());
+    let list = engine.all_annotations();
+    assert_eq!(list.len(), 1);
+    assert_eq!((list[0].kind, list[0].contents.as_str(), list[0].author.as_str()), (AnnotKind::Highlight, "Key term", "Assistant"));
+    drop(engine);
+    std::fs::remove_file(path).unwrap();
+}

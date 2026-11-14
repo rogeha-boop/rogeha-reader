@@ -78,6 +78,7 @@ fn download(codes: Vec<&'static str>) -> Result<(), String> {
     for code in codes {
         let target = dir.join(format!("{code}.traineddata"));
         let partial = dir.join(format!("{code}.traineddata.part"));
+        crate::agent_host::keep_files_out_of_helpers();
         let status = quiet(
             Command::new("curl")
                 .args(["--location", "--fail", "--silent", "--show-error", "--output"])
@@ -108,6 +109,7 @@ fn run_helper(input: PathBuf, output: PathBuf, language: String, tx: &Sender<Msg
     let mut cmd = Command::new(exe);
     cmd.arg("--ocr").arg(&input).arg(&output).arg(&language).arg(data_dir());
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    crate::agent_host::keep_files_out_of_helpers();
     let mut child = match quiet(&mut cmd).spawn() {
         Ok(c) => c,
         Err(e) => return Msg::Failed(format!("Could not start text recognition: {e}")),

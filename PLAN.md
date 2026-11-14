@@ -109,8 +109,23 @@ Done in the first version:
     appearances through MuPDF's form API, radio groups are kept consistent by hand, and a
     form's old XFA copy is dropped when filling starts so every reader shows the new values.
     Tested on a hand-built form and on the IRS W-9; values read back with pypdf.
+11. **AI assistant**: a chat panel that starts the separate `rogeha-agent` program only when
+    opened. Bring your own provider: the Claude API (default model `claude-opus-5-5`; Sonnet
+    5.5, Haiku 5.5 and Fable 5.2 selectable; streamed, adaptive thinking with an effort
+    setting, prompt caching, server-side refusal fallback), or any OpenAI-compatible endpoint
+    including local servers (Ollama, LM Studio). The assistant reads the document through
+    tools (document overview, page text, search) and answers with page citations that are
+    links; it can also act: rotate or delete pages (delete asks first), add notes, highlight
+    text, place the saved signature, list and fill form fields. Translation of a page is one
+    of the quick actions. API keys go to the OS credential store. Verified against local
+    mock servers (`crates/agent/tests`); no live provider was called during development.
 
 Planned, in this order:
+
+- **Assistant, next steps**: try it against the live APIs and tune the prompt; streaming for
+  OpenAI-compatible providers; images of pages for scans and figures (vision); translating a
+  whole document into a new file; remembering conversations per document; showing token use
+  and cost; cancelling without restarting the agent.
 
 - **Forms, next steps**: typing a custom value into editable dropdowns, several selections
   in a list box, showing a dropdown's display text instead of its stored value, date pickers
@@ -120,11 +135,6 @@ Planned, in this order:
 10. **Translation**: offline via Bergamot / Firefox Translations models (Marian) in a helper
     process, models downloaded per language pair on demand; the AI agent is the optional
     higher-quality path.
-11. **AI agent**: `rogeha-agent.exe` is already spawned lazily (stub). To do: summarize/explain/ask
-    with page citations, translate, multi-step actions through reader tools. The model is a
-    setting: current Claude IDs are `claude-fable-5-2`, `claude-opus-5-5`, `claude-sonnet-5-5`
-    and `claude-haiku-5-5` (re-check the list when this is built). Also OpenAI-compatible
-    endpoints and local models. API keys go in the OS credential store, not a plain-text file.
 
 ## Known gaps in the first version
 

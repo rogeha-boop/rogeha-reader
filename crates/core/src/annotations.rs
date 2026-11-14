@@ -346,6 +346,18 @@ impl Engine {
         }
     }
 
+    /// Highlight every occurrence of `text` on a page (optionally with a comment on the
+    /// first one). Returns how many were highlighted.
+    pub fn highlight_text(&mut self, page: usize, text: &str, author: &str, comment: &str) -> Result<usize> {
+        let hits = self.search_page(page, text)?;
+        if hits.is_empty() {
+            return Err(format!("\"{text}\" was not found on page {}", page + 1));
+        }
+        // One annotation per occurrence would clutter the comment list; one covers them all.
+        self.add_markup(page, MarkupKind::Highlight, &hits, author, comment)?;
+        Ok(hits.len())
+    }
+
     /// Change the comment text of an annotation (ours or another reader's).
     pub fn set_annotation_contents(&mut self, page: usize, xref: i32, contents: &str) -> Result<()> {
         let stamp = self.stamp(false)?;

@@ -10,10 +10,10 @@ use std::sync::Arc;
 
 use rogeha_core::{DocInfo, Event, HitQuad, PageImage, RenderKey, Request, Worker};
 
-use crate::agent_host::AgentHost;
 use crate::theme;
 
 mod about;
+mod assistant;
 mod comments;
 mod compress;
 mod dsign;
@@ -68,17 +68,6 @@ struct Search {
     active: usize,
 }
 
-#[derive(Default)]
-struct AiPanel {
-    open: bool,
-    host: Option<AgentHost>,
-    log: Vec<(bool, String)>, // (from user, text)
-    input: String,
-    status: String,
-    /// Send the current input without waiting for a click (developer automation).
-    send_now: bool,
-}
-
 enum AfterSave {
     Nothing,
     CloseApp,
@@ -131,7 +120,7 @@ pub struct ReaderApp {
     sign: sign::SignUi,
     digital: dsign::DigitalUi,
     forms: forms::FormsUi,
-    ai: AiPanel,
+    assistant: assistant::AssistantUi,
     message: Option<(String, Instant, bool)>,
     after_save: AfterSave,
     allow_close: bool,
@@ -201,7 +190,7 @@ impl ReaderApp {
             sign: sign::SignUi::default(),
             digital: dsign::DigitalUi::default(),
             forms: forms::FormsUi::default(),
-            ai: AiPanel::default(),
+            assistant: assistant::AssistantUi::default(),
             message: None,
             after_save: AfterSave::Nothing,
             allow_close: false,
@@ -492,6 +481,7 @@ impl ReaderApp {
                     }
                     self.doc = Some(info);
                     self.update_title(ctx);
+                    self.assistant_edit_outcome(Ok(()));
                 }
                 Event::Rendered { key, image } => {
                     let current = self.doc.as_ref().is_some_and(|d| d.generation == key.generation);
@@ -531,8 +521,10 @@ impl ReaderApp {
                         .position(|(p, _)| *p >= self.current_page)
                         .unwrap_or(0);
                     self.show_active_hit();
+                    self.assistant_search_done();
                 }
                 Event::PageText { .. } => {}
+                Event::PagesText(result) => self.assistant_pages_text(result),
                 Event::Selection { page, seq, selection } => {
                     if seq == self.comments.selection_seq {
                         self.comments.selection = (!selection.quads.is_empty()).then_some(
@@ -582,6 +574,7 @@ impl ReaderApp {
                     self.digital.busy = false;
                     self.search.busy = false;
                     self.after_save = AfterSave::Nothing;
+                    self.assistant_edit_outcome(Err(&message));
                     self.error(message);
                 }
             }
@@ -924,11 +917,11 @@ impl ReaderApp {
                 self.search.focus = self.search.open;
             }
             if ui
-                .add(egui::Button::new("AI").selected(self.ai.open))
+                .add(egui::Button::new("AI").selected(self.assistant.open))
                 .on_hover_text("Open the AI assistant (loaded only when opened)")
                 .clicked()
             {
-                self.ai.open = !self.ai.open;
+                self.assistant.open = !self.assistant.open;
             }
             if ui.button("About").on_hover_text("About Rogeha Reader").clicked() {
                 self.about.open = true;
@@ -1016,81 +1009,6 @@ impl ReaderApp {
                 } else {
                     self.message = None;
                 }
-            }
-        });
-    }
-
-    fn ai_panel(&mut self, ui: &mut egui::Ui) {
-        // First time the panel is shown: start the agent process.
-        if self.ai.host.is_none() && self.ai.status.is_empty() {
-            let ctx = ui.ctx().clone();
-            match AgentHost::start(move || ctx.request_repaint()) {
-                Ok(mut host) => {
-                    let _ = host.send_line(r#"{"type":"hello"}"#);
-                    self.ai.host = Some(host);
-                    self.ai.status = "Starting…".into();
-                }
-                Err(e) => self.ai.status = e,
-            }
-        }
-        if let Some(host) = &self.ai.host {
-            while let Ok(line) = host.lines.try_recv() {
-                match serde_json::from_str::<serde_json::Value>(&line) {
-                    Ok(v) => {
-                        let text = v["text"].as_str().unwrap_or_default().to_owned();
-                        match v["type"].as_str() {
-                            Some("ready") => self.ai.status = text,
-                            Some("message") => self.ai.log.push((false, text)),
-                            Some("error") => self.ai.log.push((false, format!("Error: {text}"))),
-                            _ => {}
-                        }
-                    }
-                    Err(_) => self.ai.log.push((false, line)),
-                }
-            }
-        }
-
-        ui.heading("AI assistant");
-        ui.label(egui::RichText::new(&self.ai.status).weak());
-        ui.separator();
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .max_height((ui.available_height() - 40.0).max(60.0))
-            .stick_to_bottom(true)
-            .show(ui, |ui| {
-                for (from_user, text) in &self.ai.log {
-                    let who = if *from_user { "You" } else { "Assistant" };
-                    ui.label(egui::RichText::new(who).strong());
-                    ui.label(text);
-                    ui.add_space(6.0);
-                }
-            });
-        ui.horizontal(|ui| {
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut self.ai.input)
-                    .desired_width(ui.available_width() - 60.0)
-                    .hint_text("Ask about this document"),
-            );
-            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-            let send_now = std::mem::take(&mut self.ai.send_now);
-            if (ui.button("Send").clicked() || enter || send_now) && !self.ai.input.trim().is_empty() {
-                let text = std::mem::take(&mut self.ai.input);
-                let msg = serde_json::json!({
-                    "type": "ask",
-                    "text": text,
-                    "page": self.current_page + 1,
-                    "document": self.doc.as_ref().map(|d| d.path.to_string_lossy().into_owned()),
-                });
-                match &mut self.ai.host {
-                    Some(host) => {
-                        if let Err(e) = host.send_line(&msg.to_string()) {
-                            self.ai.log.push((false, format!("Error: {e}")));
-                        }
-                    }
-                    None => self.ai.log.push((false, "The AI agent is not running.".into())),
-                }
-                self.ai.log.push((true, text));
-                resp.request_focus();
             }
         });
     }
@@ -1316,7 +1234,8 @@ impl ReaderApp {
             && !self.search.busy
             && !self.compress_busy()
             && !self.ocr_busy()
-            && !self.digital_busy();
+            && !self.digital_busy()
+            && !self.assistant_busy();
         if !idle {
             self.dev_wait = 0;
             return;
@@ -1339,11 +1258,10 @@ impl ReaderApp {
                         self.search.query = arg.to_owned();
                         self.run_search();
                     }
-                    "ai" => self.ai.open = true,
+                    "ai" => self.assistant.open = true,
                     "ask" => {
-                        self.ai.open = true;
-                        self.ai.input = arg.to_owned();
-                        self.ai.send_now = true;
+                        self.assistant.open = true;
+                        self.assistant.queued = Some(arg.to_owned());
                     }
                     "save" => self.save(),
                     // select=x0,y0,x1,y1 in page points on the current page
@@ -1478,10 +1396,10 @@ impl ReaderApp {
                 .default_size(280.0)
                 .show(ui, |ui| self.comments_panel(ui));
         }
-        if self.ai.open {
-            egui::Panel::right("ai")
-                .default_size(320.0)
-                .show(ui, |ui| self.ai_panel(ui));
+        if self.assistant.open {
+            egui::Panel::right("assistant")
+                .default_size(360.0)
+                .show(ui, |ui| self.assistant_panel(ui));
         }
         self.layer.pages.clear();
         // The document sits on `canvas`, the design system's page ground.
