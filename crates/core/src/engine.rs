@@ -1,0 +1,255 @@
+//! Synchronous document engine. Everything here runs on the worker thread
+//! (MuPDF documents are not `Send`), or directly in tests.
+
+use std::path::{Path, PathBuf};
+
+use mupdf::pdf::{PdfDocument, PdfPage, PdfWriteOptions};
+use mupdf::{Colorspace, Document, Matrix, TextPageFlags};
+
+pub type Result<T> = std::result::Result<T, String>;
+
+fn err<E: std::fmt::Display>(e: E) -> String {
+    e.to_string()
+}
+
+enum Doc {
+    Pdf(PdfDocument),
+    Other(Document),
+}
+
+impl Doc {
+    fn base(&self) -> &Document {
+        match self {
+            Doc::Pdf(d) => d,
+            Doc::Other(d) => d,
+        }
+    }
+}
+
+/// A rendered page: tightly packed RGBA8, `width * height * 4` bytes.
+pub struct PageImage {
+    pub width: usize,
+    pub height: usize,
+    pub rgba: Vec<u8>,
+}
+
+/// A search hit as a quad in page points: [ul, ur, ll, lr] as (x, y).
+pub type HitQuad = [(f32, f32); 4];
+
+pub struct Engine {
+    doc: Doc,
+    path: PathBuf,
+    /// Page sizes in points (1/72 inch), with page rotation applied.
+    sizes: Vec<(f32, f32)>,
+    dirty: bool,
+}
+
+impl Engine {
+    pub fn open(path: &Path) -> Result<Self> {
+        let path_str = path.to_str().ok_or("File path is not valid Unicode")?;
+        let doc = Document::open(path_str).map_err(err)?;
+        if doc.needs_password().map_err(err)? {
+            return Err("This document is password protected (not supported yet)".into());
+        }
+        let doc = if doc.is_pdf() {
+            Doc::Pdf(PdfDocument::try_from(doc).map_err(err)?)
+        } else {
+            Doc::Other(doc)
+        };
+        let mut engine = Self {
+            doc,
+            path: path.to_path_buf(),
+            sizes: Vec::new(),
+            dirty: false,
+        };
+        engine.refresh_sizes()?;
+        Ok(engine)
+    }
+
+    fn refresh_sizes(&mut self) -> Result<()> {
+        let doc = self.doc.base();
+        let count = doc.page_count().map_err(err)?;
+        let mut sizes = Vec::with_capacity(count.max(0) as usize);
+        for i in 0..count {
+            let size = match doc.load_page(i).and_then(|p| p.bounds()) {
+                Ok(b) => ((b.x1 - b.x0).max(1.0), (b.y1 - b.y0).max(1.0)),
+                // A broken page shouldn't stop the whole document from opening.
+                Err(_) => sizes.last().copied().unwrap_or((595.0, 842.0)),
+            };
+            sizes.push(size);
+        }
+        self.sizes = sizes;
+        Ok(())
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn is_pdf(&self) -> bool {
+        matches!(self.doc, Doc::Pdf(_))
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    pub fn page_count(&self) -> usize {
+        self.sizes.len()
+    }
+
+    pub fn page_sizes(&self) -> &[(f32, f32)] {
+        &self.sizes
+    }
+
+    pub fn title(&self) -> String {
+        self.doc
+            .base()
+            .metadata(mupdf::MetadataName::Title)
+            .unwrap_or_default()
+    }
+
+    /// Render a page at `scale` (1.0 = 72 dpi) plus an extra view-only rotation in degrees.
+    pub fn render(&self, page: usize, scale: f32) -> Result<PageImage> {
+        let p = self.doc.base().load_page(page as i32).map_err(err)?;
+        let ctm = Matrix::new_scale(scale, scale);
+        let pix = p
+            .to_pixmap(&ctm, &Colorspace::device_rgb(), false, true)
+            .map_err(err)?;
+        let (w, h) = (pix.width() as usize, pix.height() as usize);
+        let n = pix.n() as usize;
+        let stride = pix.stride() as usize;
+        let samples = pix.samples();
+        if n < 3 || samples.len() < stride * h {
+            return Err("Unexpected pixmap format".into());
+        }
+        let mut rgba = vec![255u8; w * h * 4];
+        for y in 0..h {
+            let row = &samples[y * stride..y * stride + w * n];
+            let out = &mut rgba[y * w * 4..(y + 1) * w * 4];
+            for (src, dst) in row.chunks_exact(n).zip(out.chunks_exact_mut(4)) {
+                dst[0] = src[0];
+                dst[1] = src[1];
+                dst[2] = src[2];
+            }
+        }
+        Ok(PageImage { width: w, height: h, rgba })
+    }
+
+    pub fn page_text(&self, page: usize) -> Result<String> {
+        let p = self.doc.base().load_page(page as i32).map_err(err)?;
+        let tp = p.to_text_page(TextPageFlags::empty()).map_err(err)?;
+        tp.to_text().map_err(err)
+    }
+
+    pub fn search_page(&self, page: usize, needle: &str) -> Result<Vec<HitQuad>> {
+        let p = self.doc.base().load_page(page as i32).map_err(err)?;
+        let tp = p.to_text_page(TextPageFlags::empty()).map_err(err)?;
+        let quads = tp.search(needle).map_err(err)?;
+        Ok(quads
+            .iter()
+            .map(|q| {
+                [
+                    (q.ul.x, q.ul.y),
+                    (q.ur.x, q.ur.y),
+                    (q.ll.x, q.ll.y),
+                    (q.lr.x, q.lr.y),
+                ]
+            })
+            .collect())
+    }
+
+    fn pdf_mut(&mut self) -> Result<&mut PdfDocument> {
+        match &mut self.doc {
+            Doc::Pdf(d) => Ok(d),
+            Doc::Other(_) => Err("Page editing only works on PDF files".into()),
+        }
+    }
+
+    fn check_pages(&self, pages: &[usize]) -> Result<()> {
+        match pages.iter().find(|&&p| p >= self.sizes.len()) {
+            Some(p) => Err(format!("Page {} does not exist", p + 1)),
+            None => Ok(()),
+        }
+    }
+
+    /// Rotate pages by `delta` degrees (a multiple of 90, may be negative).
+    /// This changes the page's /Rotate entry, so it is saved with the file.
+    pub fn rotate_pages(&mut self, pages: &[usize], delta: i32) -> Result<()> {
+        if delta % 90 != 0 {
+            return Err("Rotation must be a multiple of 90 degrees".into());
+        }
+        self.check_pages(pages)?;
+        let doc = self.pdf_mut()?;
+        for &page in pages {
+            let mut p: PdfPage = doc.load_pdf_page(page as i32).map_err(err)?;
+            let current = p.rotation().map_err(err)?;
+            p.set_rotation((current + delta).rem_euclid(360)).map_err(err)?;
+        }
+        self.dirty = true;
+        self.refresh_sizes()
+    }
+
+    pub fn delete_pages(&mut self, pages: &[usize]) -> Result<()> {
+        self.check_pages(pages)?;
+        let mut unique: Vec<usize> = pages.to_vec();
+        unique.sort_unstable();
+        unique.dedup();
+        if unique.len() >= self.sizes.len() {
+            return Err("Can't delete every page of a document".into());
+        }
+        let doc = self.pdf_mut()?;
+        doc.delete_pages(unique).map_err(err)?;
+        self.dirty = true;
+        self.refresh_sizes()
+    }
+
+    /// Move the page at `from` so that it ends up at index `to`.
+    pub fn move_page(&mut self, from: usize, to: usize) -> Result<()> {
+        self.check_pages(&[from, to])?;
+        let doc = self.pdf_mut()?;
+        doc.move_page(from, to).map_err(err)?;
+        self.dirty = true;
+        self.refresh_sizes()
+    }
+
+    /// Save changes. `target = None` overwrites the opened file.
+    ///
+    /// MuPDF reads the open file lazily, so we never write over it directly: the new file
+    /// is written next to the target, then swapped in, and the document is reopened.
+    pub fn save(&mut self, target: Option<&Path>) -> Result<PathBuf> {
+        let target = target.unwrap_or(&self.path).to_path_buf();
+        let Doc::Pdf(doc) = &self.doc else {
+            return Err("Only PDF files can be saved".into());
+        };
+        let mut tmp = target.clone().into_os_string();
+        tmp.push(".rr-saving");
+        let tmp = PathBuf::from(tmp);
+        let tmp_str = tmp.to_str().ok_or("File path is not valid Unicode")?;
+
+        let mut opts = PdfWriteOptions::default();
+        // Drop objects that are no longer referenced (e.g. deleted pages).
+        opts.set_garbage_level(1);
+        if let Err(e) = doc.save_with_options(tmp_str, opts) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(err(e));
+        }
+
+        // Release the old file handle before replacing the file (required on Windows).
+        self.doc = Doc::Pdf(PdfDocument::new());
+        let swap = std::fs::rename(&tmp, &target);
+        let reopen = if swap.is_ok() { &target } else { &self.path };
+        let reopened = Engine::open(reopen);
+        if let Err(e) = swap {
+            let _ = std::fs::remove_file(&tmp);
+            if let Ok(old) = reopened {
+                // Keep the unsaved state visible to the caller: edits are lost from memory,
+                // but the original file is untouched.
+                *self = old;
+            }
+            return Err(format!("Could not write {}: {e}", target.display()));
+        }
+        *self = reopened?;
+        Ok(target)
+    }
+}

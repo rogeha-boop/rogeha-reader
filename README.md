@@ -1,0 +1,54 @@
+# Rogeha Reader
+
+A fast, free, open-source PDF and EPUB reader for Windows, written in Rust on the
+[MuPDF](https://mupdf.com) engine. Native GUI (egui), no Electron, no web view.
+
+**Status: early first version.** Viewing and page editing work; signing, OCR, translation and the
+AI assistant are planned (see [PLAN.md](PLAN.md)).
+
+## What works today
+
+- Opens **PDF, EPUB, CBZ, XPS, FB2, MOBI** (everything MuPDF reads)
+- Continuous scrolling; pages render in a background thread, only the visible ones plus a little read-ahead
+- Zoom (Ctrl + wheel, Ctrl +/-), fit width, fit page, go to page
+- **Rotate pages and save the rotation into the PDF**, delete pages, move pages, save / save as
+- Text search with highlighted matches
+- Drag and drop, open from the command line (`rogeha-reader file.pdf`)
+- AI panel that starts a separate helper process only when you open it (the assistant itself is not implemented yet)
+
+## Keyboard
+
+| Keys | Action |
+| --- | --- |
+| Ctrl+O / Ctrl+S / Ctrl+Shift+S | Open / save / save as |
+| Ctrl + wheel, Ctrl + `+` / `-` | Zoom |
+| Ctrl+0 / Ctrl+1 | Fit width / 100% |
+| PgUp, PgDn, Space, arrows, Home, End | Move around |
+| R / Shift+R | Rotate the current page right / left |
+| Ctrl+F, Enter, F3 / Shift+F3 | Find, next / previous match |
+
+## Building (Windows)
+
+You need:
+
+1. **Rust** (stable, MSVC toolchain): <https://rustup.rs>
+2. **Visual Studio 2022 Build Tools** with the "Desktop development with C++" workload (MSBuild + cl)
+3. **libclang** for bindgen. Either install LLVM (`winget install LLVM.LLVM`) or
+   `pip install --user libclang`, then make sure `LIBCLANG_PATH` points at the folder with
+   `libclang.dll` (see `.cargo/config.toml`).
+
+```
+cargo build --release
+cargo test --release -p rogeha-core
+```
+
+The first build compiles MuPDF and its bundled libraries from source and takes several minutes.
+The result is `target/release/rogeha-reader.exe` (plus `rogeha-agent.exe`, the AI helper).
+
+`rogeha-reader.exe file.pdf --bench` prints time-to-first-page and memory use, then exits.
+
+## License
+
+Rogeha Reader is licensed under the **GNU Affero General Public License v3.0 or later**
+(see [LICENSE](LICENSE)), because it links MuPDF, which is AGPL-3.0. If you distribute a modified
+version, or run one as a network service, you must offer its complete source code under the same license.

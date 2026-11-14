@@ -1,0 +1,9 @@
+[package]
+name = "rogeha-agent"
+description = "AI agent helper process for Rogeha Reader (started only when the AI panel is opened)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json = "1"

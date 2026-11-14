@@ -1,0 +1,9 @@
+[package]
+name = "rogeha-core"
+description = "Document engine for Rogeha Reader (MuPDF wrapper, render worker, page operations)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mupdf.workspace = true
