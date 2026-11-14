@@ -14,6 +14,7 @@ use crate::icons::{self, Icon};
 use crate::theme;
 
 mod about;
+pub use about::version_text;
 mod assistant;
 mod comments;
 mod compress;

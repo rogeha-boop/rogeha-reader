@@ -15,7 +15,8 @@ AI assistant work; offline translation is planned (see [PLAN.md](PLAN.md)).
 - **Rotate pages and save the rotation into the PDF**, delete pages, move pages, save / save as
 - **Combine PDFs**: add the pages of other PDF files at the end or after the current page (Pages menu)
 - **Comments that other PDF readers understand**: select text to highlight, underline or strike it out,
-  add sticky notes, edit or delete comments, and see them all in the Comments panel. They are saved as
+  comment on a selected passage, add sticky notes, edit or delete comments, and see them all in the
+  Comments panel. Each person's comments get their own colour. They are saved as
   standard PDF annotations, so Acrobat, Edge, Foxit, Preview and others show and edit them too
 - **Fill out forms**: click a field to type, tick or choose; values are saved the standard way so other
   readers show them
@@ -84,6 +85,10 @@ The first build compiles MuPDF and its bundled libraries from source and takes s
 The result is `target/release/rogeha-reader.exe` (plus `rogeha-agent.exe`, the AI helper).
 
 `rogeha-reader.exe file.pdf --bench` prints time-to-first-page and memory use, then exits.
+
+The version is MAJOR.MINOR.BUILD, where BUILD is the number of commits in the repository
+(`crates/app/build.rs`), shown in the About window with the commit id; `rogeha-reader.exe --version`
+prints it.
 
 ## License
 

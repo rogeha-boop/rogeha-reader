@@ -28,6 +28,19 @@ pub(super) struct About {
     art: Option<(bool, f32, TextureHandle, TextureHandle)>,
 }
 
+/// The version shown to people: MAJOR.MINOR from the package, then the build number (the
+/// number of commits, set by build.rs), and the commit the build was made from.
+/// For example `Version 0.1.31 (6f4ca52)`; a trailing `+` means uncommitted changes.
+pub fn version_text() -> String {
+    let base = concat!(env!("CARGO_PKG_VERSION_MAJOR"), ".", env!("CARGO_PKG_VERSION_MINOR"));
+    let (build, commit) = (env!("ROGEHA_BUILD_NUMBER"), env!("ROGEHA_COMMIT"));
+    if commit.is_empty() {
+        format!("Version {base}.{build}")
+    } else {
+        format!("Version {base}.{build} ({commit})")
+    }
+}
+
 /// Draw an SVG with MuPDF at exactly the pixels it will occupy, so it is crisp on any screen.
 fn svg_texture(ctx: &egui::Context, name: &str, svg: &[u8], width_points: f32, cut_corners: bool) -> Option<TextureHandle> {
     let width = (width_points * ctx.pixels_per_point()).round().max(1.0) as usize;
@@ -94,7 +107,7 @@ impl ReaderApp {
                             ui.add_space(4.0);
                             ui.label(RichText::new(APP_NAME).font(egui::FontId::new(24.0, theme::semibold())).color(t.ink));
                             // Versions are measured values: Plex Mono.
-                            ui.label(RichText::new(concat!("Version ", env!("CARGO_PKG_VERSION"))).monospace().color(t.ink_muted));
+                            ui.label(RichText::new(version_text()).monospace().color(t.ink_muted));
                         });
                     });
                 } else {

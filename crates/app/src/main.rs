@@ -16,6 +16,10 @@ fn main() {
     // Helper mode: `rogeha-reader --compress <in.pdf> <out.pdf> <preset>`.
     // The reader starts itself this way so a damaged file can only stop the helper.
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if args.get(1).is_some_and(|a| a == "--version") {
+        println!("Rogeha Reader {}", app::version_text());
+        return;
+    }
     if args.get(1).is_some_and(|a| a == "--compress") {
         std::process::exit(compress_helper(&args[2..]));
     }
