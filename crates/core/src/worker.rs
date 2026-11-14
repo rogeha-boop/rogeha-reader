@@ -7,6 +7,7 @@ use std::thread;
 
 use crate::annotations::{AnnotInfo, MarkupKind, TextSelection};
 use crate::engine::{Engine, HitQuad, PageImage};
+use crate::dsig::{Identity, SignOptions, SignatureInfo};
 use crate::signature::SignatureArt;
 
 /// Identifies one rendered image: which page, at which scale, for which document state.
@@ -52,6 +53,10 @@ pub enum Request {
     DeleteAnnotation { page: usize, xref: i32 },
     /// Stamp a visual signature; `rect` is (x0, y0, x1, y1) in displayed page points.
     StampSignature { page: usize, rect: (f32, f32, f32, f32), art: SignatureArt, ink: [u8; 3] },
+    /// Digitally sign with a PKCS#12 identity and write to `target` (`None`: the opened file).
+    SignDocument { target: Option<PathBuf>, p12: Vec<u8>, password: String, options: SignOptions },
+    /// Send the document's digital signatures now, and again after every change.
+    ListSignatures,
     Close,
 }
 
@@ -69,6 +74,10 @@ pub enum Event {
     Annotations { generation: u64, list: Vec<AnnotInfo> },
     /// A comment was just created (so the GUI can select it).
     AnnotationAdded { page: usize, xref: i32 },
+    /// The document's digital signatures, checked, for the given document generation.
+    Signatures { generation: u64, list: Vec<SignatureInfo> },
+    /// The document was signed and written to this file.
+    Signed(PathBuf),
     Closed,
     Error(String),
 }
@@ -104,6 +113,7 @@ struct State {
     queue: Vec<RenderKey>,
     /// The GUI asked for the comment list, so keep it up to date.
     wants_annotations: bool,
+    wants_signatures: bool,
 }
 
 fn run(rx: Receiver<Request>, etx: Sender<Event>, wake: impl Fn()) {
@@ -112,6 +122,7 @@ fn run(rx: Receiver<Request>, etx: Sender<Event>, wake: impl Fn()) {
         generation: 0,
         queue: Vec::new(),
         wants_annotations: false,
+        wants_signatures: false,
     };
     let emit = |e: Event| {
         let ok = etx.send(e).is_ok();
@@ -179,8 +190,18 @@ fn changed(st: &mut State, emit: &impl Fn(Event) -> bool) -> bool {
     st.generation += 1;
     st.queue.clear();
     match doc_info(st) {
-        Some(info) => emit(Event::Doc(info)) && send_annotations(st, emit),
+        Some(info) => emit(Event::Doc(info)) && send_annotations(st, emit) && send_signatures(st, emit),
         None => true,
+    }
+}
+
+fn send_signatures(st: &State, emit: &impl Fn(Event) -> bool) -> bool {
+    match &st.engine {
+        Some(engine) if st.wants_signatures => emit(Event::Signatures {
+            generation: st.generation,
+            list: engine.signatures(),
+        }),
+        _ => true,
     }
 }
 
@@ -299,6 +320,22 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
         }
         Request::StampSignature { page, rect, art, ink } => {
             edit!(|e: &mut Engine| e.stamp_signature(page, rect, &art, ink))
+        }
+        Request::ListSignatures => {
+            st.wants_signatures = true;
+            send_signatures(st, emit)
+        }
+        Request::SignDocument { target, p12, password, options } => {
+            let Some(engine) = st.engine.as_mut() else {
+                return emit(Event::Error("No document is open".into()));
+            };
+            let result = Identity::from_pkcs12(&p12, &password)
+                .and_then(|identity| engine.sign_document(target.as_deref(), &identity, &options));
+            match result {
+                Ok(path) => changed(st, emit) && emit(Event::Signed(path)),
+                // The engine may have gone back to the file on disk; resync the GUI either way.
+                Err(e) => changed(st, emit) && emit(Event::Error(e)),
+            }
         }
         Request::Close => {
             st.engine = None;

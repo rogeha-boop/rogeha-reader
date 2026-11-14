@@ -16,6 +16,7 @@ use crate::theme;
 mod about;
 mod comments;
 mod compress;
+mod dsign;
 mod ocr;
 mod sign;
 
@@ -127,6 +128,7 @@ pub struct ReaderApp {
     about: about::About,
     ocr: ocr::OcrUi,
     sign: sign::SignUi,
+    digital: dsign::DigitalUi,
     ai: AiPanel,
     message: Option<(String, Instant, bool)>,
     after_save: AfterSave,
@@ -195,6 +197,7 @@ impl ReaderApp {
             about: about::About::default(),
             ocr: ocr::OcrUi::default(),
             sign: sign::SignUi::default(),
+            digital: dsign::DigitalUi::default(),
             ai: AiPanel::default(),
             message: None,
             after_save: AfterSave::Nothing,
@@ -461,6 +464,7 @@ impl ReaderApp {
                     }
                     if !same_file {
                         self.comments.reset_for_new_document();
+                        self.digital.reset_for_new_document();
                     }
                     self.failed.clear();
                     self.last_want.clear();
@@ -544,6 +548,17 @@ impl ReaderApp {
                         }
                     }
                 }
+                Event::Signatures { generation, list } => {
+                    if self.doc.as_ref().is_some_and(|d| d.generation == generation) {
+                        self.digital.list = list;
+                    }
+                }
+                Event::Signed(path) => {
+                    self.digital.busy = false;
+                    self.sign.open = false;
+                    self.digital.window_open = true;
+                    self.info(format!("Signed and saved as {}", path.display()));
+                }
                 Event::AnnotationAdded { page, xref } => {
                     self.comments.open_when_listed = Some((page, xref));
                 }
@@ -554,6 +569,7 @@ impl ReaderApp {
                 }
                 Event::Error(message) => {
                     self.opening = false;
+                    self.digital.busy = false;
                     self.search.busy = false;
                     self.after_save = AfterSave::Nothing;
                     self.error(message);
@@ -966,6 +982,13 @@ impl ReaderApp {
                     ui.separator();
                     ui.label("Unsaved changes");
                 }
+                if let Some((text, warning)) = self.signature_summary() {
+                    ui.separator();
+                    let color = if warning { ui.visuals().error_fg_color } else { ui.visuals().hyperlink_color };
+                    if ui.link(egui::RichText::new(text).color(color)).on_hover_text("Show the signature details").clicked() {
+                        self.digital.window_open = true;
+                    }
+                }
             } else {
                 ui.label("No document");
             }
@@ -1204,6 +1227,10 @@ impl ReaderApp {
             self.comments.requested = true;
             self.worker.send(Request::ListAnnotations);
         }
+        if !self.digital.requested && !self.textures.is_empty() {
+            self.digital.requested = true;
+            self.worker.send(Request::ListSignatures);
+        }
         let Some(doc) = &self.doc else { return };
 
         // Ask the worker for what is visible (plus a little read-ahead).
@@ -1273,7 +1300,8 @@ impl ReaderApp {
             && self.last_want.is_empty()
             && !self.search.busy
             && !self.compress_busy()
-            && !self.ocr_busy();
+            && !self.ocr_busy()
+            && !self.digital_busy();
         if !idle {
             self.dev_wait = 0;
             return;
@@ -1335,6 +1363,9 @@ impl ReaderApp {
                         }
                     }
                     "signapply" => self.apply_signature(),
+                    "signatures" => self.digital.window_open = true,
+                    "certtab" => self.dev_certificate_tab(),
+                    "dsign" => self.dev_sign_digitally(arg),
                     "ocrdownload" => {
                         self.ocr.open = true;
                         self.ocr_download_missing(ctx);
@@ -1455,6 +1486,7 @@ impl ReaderApp {
         self.about_window(&ctx);
         self.ocr_window(&ctx);
         self.sign_window(&ctx);
+        self.signatures_window(&ctx);
         self.run_dev(&ctx);
         self.finish_bench(&ctx);
     }

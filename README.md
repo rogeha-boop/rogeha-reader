@@ -4,8 +4,8 @@ A fast, free, open-source PDF and EPUB reader for Windows, written in Rust on th
 [MuPDF](https://mupdf.com) engine. Native GUI (egui) drawn on the CPU: no Electron, no web view,
 no GPU driver.
 
-**Status: early first version.** Viewing, page editing and comments work; signing, OCR, translation
-and the AI assistant are planned (see [PLAN.md](PLAN.md)).
+**Status: early version.** Viewing, page editing, comments, compression, OCR and signing work;
+form filling, translation and the AI assistant are planned (see [PLAN.md](PLAN.md)).
 
 ## What works today
 
@@ -18,7 +18,10 @@ and the AI assistant are planned (see [PLAN.md](PLAN.md)).
   add sticky notes, edit or delete comments, and see them all in the Comments panel. They are saved as
   standard PDF annotations, so Acrobat, Edge, Foxit, Preview and others show and edit them too
 - **Sign**: draw, type or load a picture of your signature, place and resize it on the page, and stamp it
-  in. (A visual signature; certificate-based digital signatures are planned)
+  in
+- **Digital signatures**: sign with a `.p12` / `.pfx` certificate (or create a self-signed one), and see
+  for every signed PDF whether it is intact and who signed it. Standard PKCS#7 signatures that other
+  readers validate. The signer's certificate is not yet checked against trusted authorities
 - **OCR** (Pages menu): makes scanned PDFs searchable and selectable by adding an invisible text layer;
   the pages look exactly the same. Language data is downloaded once per language, then it works offline
 - **Compress scanned PDFs** (Pages menu) into a smaller copy with no visible quality loss; text and

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use mupdf::Size;
 use mupdf::pdf::PdfDocument;
+use rogeha_core::{Identity, SignOptions, SignatureStatus};
 use rogeha_core::{AnnotKind, Engine, INK_BLUE, MarkupKind, Preset, SignatureArt, compress_pdf, load_signature_image, ocr_pdf};
 
 const A: (f32, f32) = (595.0, 842.0);
@@ -505,6 +506,71 @@ fn picture_signatures_keep_their_transparency() {
     assert_eq!(preview[3], 0, "corner is transparent");
     let mid = &preview[(50 * pw + 150) * 4..][..4]; // on the horizontal stroke
     assert_eq!(mid, [0x1d, 0x43, 0x68, 255]);
+    drop(engine);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn digital_signatures_sign_and_verify() {
+    let path = text_fixture("dsig");
+    let mut engine = Engine::open(&path).unwrap();
+    assert!(engine.signatures().is_empty());
+
+    // A new self-signed identity, written to and read back from a .p12 file.
+    let p12 = Identity::create_self_signed("Ada Lovelace", "Analytical Engines", "test-pass", 3).unwrap();
+    assert!(Identity::from_pkcs12(&p12, "wrong").is_err(), "wrong password must be refused");
+    assert!(Identity::from_pkcs12(b"not a certificate", "x").is_err());
+    assert!(Identity::create_self_signed(" ", "", "p", 1).is_err());
+    let identity = Identity::from_pkcs12(&p12, "test-pass").unwrap();
+    assert_eq!(identity.name(), "Ada Lovelace");
+
+    let before = engine.render(0, 1.0).unwrap().pixels;
+    let options = SignOptions { reason: "I approve this document".into(), location: "Z\u{fc}rich".into() };
+    engine.sign_document(None, &identity, &options).unwrap();
+    assert!(!engine.is_dirty());
+    assert!(engine.render(0, 1.0).unwrap().pixels == before, "an invisible signature changes nothing on the page");
+
+    let sigs = engine.signatures();
+    assert_eq!(sigs.len(), 1);
+    let s = &sigs[0];
+    assert_eq!(s.status, SignatureStatus::Intact);
+    assert_eq!((s.signer.as_str(), s.reason.as_str(), s.location.as_str()), ("Ada Lovelace", "I approve this document", "Z\u{fc}rich"));
+    assert!(s.covers_whole_file && s.self_signed && s.certificate_valid_at_signing);
+    assert!(s.signed_at.is_some());
+    drop(engine);
+
+    // Keep copies for the independent check (see tests/check_signature.py).
+    if let Some(dir) = std::env::var_os("ROGEHA_KEEP_SIGNED") {
+        let dir = PathBuf::from(dir);
+        std::fs::copy(&path, dir.join("signed.pdf")).unwrap();
+        std::fs::write(dir.join("identity.p12"), &p12).unwrap();
+    }
+
+    // Tampering with a signed byte is detected.
+    let good = std::fs::read(&path).unwrap();
+    let mut bad = good.clone();
+    let at = bad.windows(5).position(|w| w == b"Hello").unwrap();
+    bad[at] = b'J';
+    std::fs::write(&path, &bad).unwrap();
+    let tampered = Engine::open(&path).unwrap().signatures();
+    assert!(matches!(&tampered[0].status, SignatureStatus::Broken(why) if why.contains("changed")), "{:?}", tampered[0].status);
+    std::fs::write(&path, &good).unwrap();
+
+    // Adding a comment afterwards keeps the signature intact, but it no longer covers the
+    // whole file; signing again adds a second signature and keeps the first one valid.
+    let mut engine = Engine::open(&path).unwrap();
+    engine.add_note(0, (300.0, 300.0), "Looks good", "Bob").unwrap();
+    engine.save(None).unwrap();
+    let sigs = engine.signatures();
+    assert_eq!(sigs[0].status, SignatureStatus::Intact);
+    assert!(!sigs[0].covers_whole_file);
+
+    engine.sign_document(None, &identity, &SignOptions::default()).unwrap();
+    let sigs = engine.signatures();
+    assert_eq!(sigs.len(), 2);
+    assert!(sigs.iter().all(|s| s.status == SignatureStatus::Intact), "{sigs:?}");
+    assert_eq!(sigs.iter().filter(|s| s.covers_whole_file).count(), 1);
+    assert_eq!(engine.all_annotations().len(), 1, "the comment is still there");
     drop(engine);
     std::fs::remove_file(path).unwrap();
 }

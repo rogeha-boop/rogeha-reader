@@ -24,6 +24,7 @@ enum Tab {
     Draw,
     Type,
     Picture,
+    Certificate,
 }
 
 /// A signature ready to use: what it looks like, its shape and its ink.
@@ -212,6 +213,7 @@ impl ReaderApp {
                 (!art.is_empty()).then(|| Ready { aspect: art.aspect(), art, ink, preview: None })
             }
             Tab::Picture => self.sign.picture.clone(),
+            Tab::Certificate => None,
         }
     }
 
@@ -299,8 +301,14 @@ impl ReaderApp {
                     ui.selectable_value(&mut self.sign.tab, Tab::Draw, "Draw");
                     ui.selectable_value(&mut self.sign.tab, Tab::Type, "Type");
                     ui.selectable_value(&mut self.sign.tab, Tab::Picture, "Picture");
+                    ui.separator();
+                    ui.selectable_value(&mut self.sign.tab, Tab::Certificate, "Certificate (digital)");
                 });
                 ui.add_space(4.0);
+                if self.sign.tab == Tab::Certificate {
+                    self.certificate_tab(ui);
+                    return;
+                }
                 let ink = if self.sign.blue { INK_BLUE } else { INK_BLACK };
                 let ink_color = Color32::from_rgb(ink[0], ink[1], ink[2]);
 
@@ -354,6 +362,7 @@ impl ReaderApp {
                             }
                         }
                     }
+                    Tab::Certificate => {}
                     Tab::Picture => {
                         ui.horizontal(|ui| {
                             if ui.button("Choose a picture…").clicked() {
@@ -586,6 +595,11 @@ impl ReaderApp {
     }
 
     // ------------------------------------------------------------- scripted checks
+
+    pub(super) fn dev_certificate_tab(&mut self) {
+        self.sign.open = true;
+        self.sign.tab = Tab::Certificate;
+    }
 
     /// `kind` is "draw" or a name to type; places it at (x, y) on the current page.
     pub(super) fn dev_sign(&mut self, kind: &str, at: Option<(f32, f32)>) {

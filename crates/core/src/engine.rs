@@ -220,6 +220,11 @@ impl Engine {
         }
     }
 
+    /// Let go of the opened file (needed on Windows before replacing it).
+    pub(crate) fn release_file(&mut self) {
+        self.doc = Doc::Pdf(PdfDocument::new());
+    }
+
     pub(crate) fn mark_dirty(&mut self) {
         self.dirty = true;
     }

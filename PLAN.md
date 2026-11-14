@@ -96,9 +96,26 @@ Done in the first version:
    content: drawn signatures as smooth vector strokes, typed ones as Times Italic text,
    pictures as an image with transparency. Upright on rotated pages. Up to six signatures can
    be remembered on the computer. The on-page preview is drawn by the same code that stamps.
+9. **Digital signature** (Sign window, "Certificate" tab): signs with a `.p12` / `.pfx`
+   identity as a standard detached PKCS#7 / CMS signature (`adbe.pkcs7.detached`, SHA-256,
+   RSA), saved incrementally so earlier signatures stay valid. Can create a self-signed
+   identity (RSA 3072) as a password-protected `.p12`. On open, signatures are checked:
+   intact or changed, who signed, whether content was added afterwards, self-signed or not.
+   Written in Rust (RSA from RustCrypto, a small DER reader/writer of our own, `p12-keystore`),
+   without MuPDF's signing API. Cross-checked both ways with pyHanko.
 
 Planned, in this order:
 
+- **Fill out PDF forms**: text fields, checkboxes, radio buttons, dropdowns and lists, typed
+  directly on the page and saved as standard AcroForm values with regenerated appearances
+  (so every reader shows them); tab order, required fields, and form calculations through
+  MuPDF's form API. XFA-only forms are out of scope.
+
+- **Digital signatures, next steps**: checking the signer's certificate chain against the
+  Windows trust store and revocation, a visible signature box on the page, timestamps from a
+  timestamp authority (and long-term validation), elliptic-curve certificates, certificates
+  from the Windows certificate store or a smart card, and showing the signer's name when a
+  signature is broken.
 - **Signing, next steps**: a handwriting-style font for typed signatures, initials and date
   stamps, signing several pages at once, better clean-up of photos taken in uneven light,
   and protecting remembered signatures (they are stored unencrypted in the user profile).
@@ -115,9 +132,6 @@ Planned, in this order:
 
 5. **Page organizer**: thumbnail grid with drag-to-reorder, multi-select, rotate/delete,
    merge from several files, extract/split pages.
-8. **Digital signature**: PKCS#7/CMS from .p12/PFX (or a new self-signed identity); signing through
-   MuPDF's `pdf_sign_signature` with a Rust-implemented `pdf_pkcs7_signer` (RustCrypto `cms`,
-   `pkcs12`, `rsa`, `x509-cert`); verifying signatures on open with a Rust verifier.
 10. **Translation**: offline via Bergamot / Firefox Translations models (Marian) in a helper
     process, models downloaded per language pair on demand; the AI agent is the optional
     higher-quality path.
