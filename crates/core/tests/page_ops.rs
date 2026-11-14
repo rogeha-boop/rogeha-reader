@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use mupdf::Size;
 use mupdf::pdf::PdfDocument;
-use rogeha_core::{AnnotKind, Engine, MarkupKind, Preset, compress_pdf, ocr_pdf};
+use rogeha_core::{AnnotKind, Engine, INK_BLUE, MarkupKind, Preset, SignatureArt, compress_pdf, load_signature_image, ocr_pdf};
 
 const A: (f32, f32) = (595.0, 842.0);
 const B: (f32, f32) = (300.0, 400.0);
@@ -389,4 +389,122 @@ fn ocr_adds_a_text_layer_that_matches_the_picture() {
     for f in [source, scan, out, again] {
         std::fs::remove_file(f).unwrap();
     }
+}
+
+/// Share of pixels in a page rectangle (given in points) that are not white.
+fn ink_share(engine: &Engine, page: usize, rect: (f32, f32, f32, f32)) -> f64 {
+    let img = engine.render(page, 2.0).unwrap();
+    let (x0, y0, x1, y1) = ((rect.0 * 2.0) as usize, (rect.1 * 2.0) as usize, (rect.2 * 2.0) as usize, (rect.3 * 2.0) as usize);
+    let mut inked = 0;
+    for y in y0..y1.min(img.height) {
+        for x in x0..x1.min(img.width) {
+            inked += (img.pixels[y * img.width + x] != 0x00FF_FFFF) as usize;
+        }
+    }
+    inked as f64 / ((x1 - x0) * (y1 - y0)).max(1) as f64
+}
+
+fn zigzag() -> SignatureArt {
+    SignatureArt::Strokes(vec![
+        vec![(0.0, 0.8), (0.2, 0.1), (0.4, 0.9), (0.6, 0.1), (0.8, 0.9), (1.0, 0.2)],
+        vec![(0.1, 0.5), (0.9, 0.5)],
+    ])
+}
+
+#[test]
+fn drawn_and_typed_signatures_are_stamped_into_the_page() {
+    let path = text_fixture("sign");
+    let mut engine = Engine::open(&path).unwrap();
+    let drawn = (300.0, 500.0, 480.0, 560.0);
+    let typed = (80.0, 600.0, 330.0, 650.0);
+    assert_eq!(ink_share(&engine, 0, drawn), 0.0);
+
+    engine.stamp_signature(0, drawn, &zigzag(), INK_BLUE).unwrap();
+    engine.stamp_signature(0, typed, &SignatureArt::Text("Ada Lovelace (\u{e9})".into()), INK_BLUE).unwrap();
+    assert!(engine.is_dirty());
+    // Bad requests are refused and leave the page alone.
+    assert!(engine.stamp_signature(0, drawn, &SignatureArt::Text("  ".into()), INK_BLUE).is_err());
+    assert!(engine.stamp_signature(0, (10.0, 10.0, 10.0, 10.0), &zigzag(), INK_BLUE).is_err());
+    assert!(engine.stamp_signature(5, drawn, &zigzag(), INK_BLUE).is_err());
+
+    engine.save(None).unwrap();
+    let reopened = Engine::open(&path).unwrap();
+    // The ink is there, inside its box and nowhere around it, and it is the chosen colour.
+    assert!(ink_share(&reopened, 0, drawn) > 0.03);
+    assert!(ink_share(&reopened, 0, typed) > 0.03);
+    assert_eq!(ink_share(&reopened, 0, (300.0, 430.0, 480.0, 490.0)), 0.0);
+    assert_eq!(ink_share(&reopened, 0, (490.0, 500.0, 560.0, 560.0)), 0.0);
+    let img = reopened.render(0, 2.0).unwrap();
+    let mid_line = img.pixels[(530 * 2) * img.width + 390 * 2]; // on the horizontal stroke
+    assert_eq!(mid_line, 0x001D_4368, "stroke colour");
+    // The typed name is real text, and the page's own text is untouched.
+    let text = reopened.page_text(0).unwrap();
+    assert!(text.contains("Ada Lovelace (\u{e9})"), "{text}");
+    assert!(text.contains("Hello annotated world"));
+    // It is page content, not a comment.
+    assert!(reopened.all_annotations().is_empty());
+    drop((engine, reopened));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn signatures_come_out_upright_on_rotated_pages() {
+    let path = text_fixture("sign-rot");
+    let mut engine = Engine::open(&path).unwrap();
+    engine.rotate_pages(&[0], 90).unwrap();
+    assert_eq!(sizes(&engine), vec![(842, 595)]);
+    // A box near the bottom right of the page as displayed (landscape).
+    let rect = (600.0, 450.0, 800.0, 520.0);
+    engine.stamp_signature(0, rect, &zigzag(), INK_BLUE).unwrap();
+    assert!(ink_share(&engine, 0, rect) > 0.03);
+    assert_eq!(ink_share(&engine, 0, (600.0, 370.0, 800.0, 440.0)), 0.0);
+    // Upright: the horizontal stroke is still horizontal, at half the box height.
+    let img = engine.render(0, 2.0).unwrap();
+    let y = (485.0 * 2.0) as usize;
+    let on_line = (640..760).filter(|x| img.pixels[y * img.width + x * 2] != 0x00FF_FFFF).count();
+    assert!(on_line > 100, "horizontal stroke covers {on_line} of 120 samples");
+    drop(engine);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn picture_signatures_keep_their_transparency() {
+    let path = text_fixture("sign-img");
+    let mut engine = Engine::open(&path).unwrap();
+    // A red block with a fully transparent border.
+    let (w, h) = (60usize, 30usize);
+    let mut rgba = vec![0u8; w * h * 4];
+    for y in 8..22 {
+        for x in 10..50 {
+            rgba[(y * w + x) * 4..][..4].copy_from_slice(&[200, 30, 30, 255]);
+        }
+    }
+    let art = SignatureArt::Image { rgba, width: w, height: h };
+    assert_eq!(art.aspect(), 2.0);
+    // Placed over the page's text line: the transparent border must not cover it.
+    let rect = (60.0, 110.0, 180.0, 170.0);
+    let before = engine.render(0, 2.0).unwrap();
+    engine.stamp_signature(0, rect, &art, INK_BLUE).unwrap();
+    let after = engine.render(0, 2.0).unwrap();
+    let px = |img: &rogeha_core::PageImage, x: f32, y: f32| img.pixels[(y * 2.0) as usize * img.width + (x * 2.0) as usize];
+    assert_eq!(px(&after, 120.0, 140.0), 0x00C8_1E1E, "centre shows the picture");
+    for (x, y) in [(64.0, 114.0), (176.0, 166.0), (70.0, 122.0)] {
+        assert_eq!(px(&after, x, y), px(&before, x, y), "border at {x},{y} must be see-through");
+    }
+
+    // Loading a "photo" (here: the fixture page itself): white paper becomes transparent
+    // and the picture is cropped to the ink.
+    let photo = load_signature_image(&std::fs::read(&path).unwrap(), "pdf", true).unwrap();
+    let SignatureArt::Image { rgba, width, height } = &photo else { panic!() };
+    assert!(*width > 100 && *height < *width / 2, "cropped to the inked area: {width}x{height}");
+    assert!(rgba.chunks_exact(4).any(|p| p[3] == 0) && rgba.chunks_exact(4).any(|p| p[3] == 255));
+    assert!(load_signature_image(b"not a picture", "png", true).is_err());
+    // The preview is drawn by the same code: transparent ground, ink where the strokes are.
+    let (preview, pw, ph) = rogeha_core::render_signature(&zigzag(), 3.0, INK_BLUE, 300).unwrap();
+    assert_eq!((pw, ph), (300, 100));
+    assert_eq!(preview[3], 0, "corner is transparent");
+    let mid = &preview[(50 * pw + 150) * 4..][..4]; // on the horizontal stroke
+    assert_eq!(mid, [0x1d, 0x43, 0x68, 255]);
+    drop(engine);
+    std::fs::remove_file(path).unwrap();
 }

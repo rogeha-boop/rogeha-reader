@@ -54,16 +54,7 @@ fn data_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("ROGEHA_TESSDATA") {
         return PathBuf::from(dir);
     }
-    let base = if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
-    } else if cfg!(target_os = "macos") {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
-    } else {
-        std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
-    };
-    base.unwrap_or_else(std::env::temp_dir).join("Rogeha Reader").join("tessdata")
+    super::app_data_dir().join("tessdata")
 }
 
 fn installed(code: &str) -> bool {

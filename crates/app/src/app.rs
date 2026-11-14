@@ -17,6 +17,7 @@ mod about;
 mod comments;
 mod compress;
 mod ocr;
+mod sign;
 
 /// PDF points (1/72") to screen pixels at 100% zoom (96 dpi).
 const PT_TO_PX: f32 = 96.0 / 72.0;
@@ -125,6 +126,7 @@ pub struct ReaderApp {
     compress: compress::CompressUi,
     about: about::About,
     ocr: ocr::OcrUi,
+    sign: sign::SignUi,
     ai: AiPanel,
     message: Option<(String, Instant, bool)>,
     after_save: AfterSave,
@@ -192,6 +194,7 @@ impl ReaderApp {
             compress: compress::CompressUi::default(),
             about: about::About::default(),
             ocr: ocr::OcrUi::default(),
+            sign: sign::SignUi::default(),
             ai: AiPanel::default(),
             message: None,
             after_save: AfterSave::Nothing,
@@ -867,6 +870,15 @@ impl ReaderApp {
             {
                 self.comments.note_tool = !self.comments.note_tool;
             }
+            if ui
+                .add_enabled(can_edit, egui::Button::new("Sign").selected(self.sign.open || self.sign.placing.is_some()))
+                .on_hover_text("Add your signature to a page")
+                .on_disabled_hover_text(edit_hint)
+                .clicked()
+            {
+                self.sign.placing = None;
+                self.sign.open = !self.sign.open;
+            }
             let label = match self.comments.list.len() {
                 0 => "Comments".to_owned(),
                 n => format!("Comments ({n})"),
@@ -1180,8 +1192,14 @@ impl ReaderApp {
         // Comments: mouse handling and overlays. Ask for the comment list once the first
         // page is on screen (so it never delays opening a document).
         let ctx = ui.ctx().clone();
-        self.page_interactions(&ctx, &page_hits, scale);
-        self.comment_overlays(ui, &page_hits, scale);
+        if self.sign.placing.is_some() {
+            // Placing a signature takes over the mouse from text selection.
+            self.placement_interactions(&ctx, &page_hits, scale);
+            self.placement_overlay(ui, &page_hits, scale);
+        } else {
+            self.page_interactions(&ctx, &page_hits, scale);
+            self.comment_overlays(ui, &page_hits, scale);
+        }
         if !self.comments.requested && !self.textures.is_empty() {
             self.comments.requested = true;
             self.worker.send(Request::ListAnnotations);
@@ -1308,6 +1326,15 @@ impl ReaderApp {
                     }),
                     "comments" => self.comments.panel_open = true,
                     "about" => self.about.open = true,
+                    "sign" => self.sign.open = true,
+                    // signat=<x>,<y>,<draw | a name>: start placing at that point on the current page
+                    "signat" => {
+                        let parts: Vec<&str> = arg.splitn(3, ',').collect();
+                        if let [x, y, kind] = parts[..] {
+                            self.dev_sign(kind, x.parse().ok().zip(y.parse().ok()));
+                        }
+                    }
+                    "signapply" => self.apply_signature(),
                     "ocrdownload" => {
                         self.ocr.open = true;
                         self.ocr_download_missing(ctx);
@@ -1427,6 +1454,7 @@ impl ReaderApp {
         self.compress_window(&ctx);
         self.about_window(&ctx);
         self.ocr_window(&ctx);
+        self.sign_window(&ctx);
         self.run_dev(&ctx);
         self.finish_bench(&ctx);
     }
@@ -1473,4 +1501,21 @@ fn memory_usage() -> (usize, usize) {
 #[cfg(not(windows))]
 fn memory_usage() -> (usize, usize) {
     (0, 0)
+}
+
+/// Folder for things the app remembers on this computer (OCR language data, signatures).
+fn app_data_dir() -> PathBuf {
+    let base = if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+    };
+    // `ROGEHA_DATA_DIR` moves it (used by the scripted checks).
+    std::env::var_os("ROGEHA_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| base.unwrap_or_else(std::env::temp_dir).join("Rogeha Reader"))
 }

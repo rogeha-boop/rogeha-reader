@@ -162,7 +162,7 @@ unsafe fn recognise_page(
 }
 
 /// Windows-1252 byte for a character, if it has one (the encoding of the text-layer font).
-fn winansi(c: char) -> Option<u8> {
+pub(crate) fn winansi(c: char) -> Option<u8> {
     Some(match c {
         ' '..='~' => c as u8,
         '\u{a0}'..='\u{ff}' => c as u32 as u8,

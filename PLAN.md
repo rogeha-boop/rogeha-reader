@@ -90,9 +90,18 @@ Done in the first version:
    Pages that already have text are skipped. Language data (8 languages offered) is downloaded
    once on request into the app data folder; after that it works offline.
    Measured on 300 dpi test scans: 96-98% of words exact, about 4 s per page.
+8. **Visual signature** ("Sign"): draw with the mouse or a pen, type a name, or load a photo
+   or scan (the paper around the ink is removed and the picture cropped). Click the page to
+   place it, drag to move, drag the corner to resize, then apply. It is stamped into the page
+   content: drawn signatures as smooth vector strokes, typed ones as Times Italic text,
+   pictures as an image with transparency. Upright on rotated pages. Up to six signatures can
+   be remembered on the computer. The on-page preview is drawn by the same code that stamps.
 
 Planned, in this order:
 
+- **Signing, next steps**: a handwriting-style font for typed signatures, initials and date
+  stamps, signing several pages at once, better clean-up of photos taken in uneven light,
+  and protecting remembered signatures (they are stored unencrypted in the user profile).
 - **OCR, next steps**: text outside Windows-1252 (Cyrillic, Greek, CJK need an embedded
   Unicode font for the layer), rotated and vertical text, automatic language detection,
   OCR of just the current page for quick searching, deskewing crooked scans first.
@@ -106,8 +115,6 @@ Planned, in this order:
 
 5. **Page organizer**: thumbnail grid with drag-to-reorder, multi-select, rotate/delete,
    merge from several files, extract/split pages.
-7. **Visual signature**: draw / type / load an image; place and resize on the page; stamp it
-   into a saved copy (`PdfPage::insert_image`).
 8. **Digital signature**: PKCS#7/CMS from .p12/PFX (or a new self-signed identity); signing through
    MuPDF's `pdf_sign_signature` with a Rust-implemented `pdf_pkcs7_signer` (RustCrypto `cms`,
    `pkcs12`, `rsa`, `x509-cert`); verifying signatures on open with a Rust verifier.

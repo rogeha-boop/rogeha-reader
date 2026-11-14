@@ -7,6 +7,7 @@ use std::thread;
 
 use crate::annotations::{AnnotInfo, MarkupKind, TextSelection};
 use crate::engine::{Engine, HitQuad, PageImage};
+use crate::signature::SignatureArt;
 
 /// Identifies one rendered image: which page, at which scale, for which document state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -49,6 +50,8 @@ pub enum Request {
     AddNote { page: usize, at: (f32, f32), contents: String, author: String },
     EditAnnotation { page: usize, xref: i32, contents: String },
     DeleteAnnotation { page: usize, xref: i32 },
+    /// Stamp a visual signature; `rect` is (x0, y0, x1, y1) in displayed page points.
+    StampSignature { page: usize, rect: (f32, f32, f32, f32), art: SignatureArt, ink: [u8; 3] },
     Close,
 }
 
@@ -293,6 +296,9 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
         }
         Request::DeleteAnnotation { page, xref } => {
             edit!(|e: &mut Engine| e.delete_annotation(page, xref))
+        }
+        Request::StampSignature { page, rect, art, ink } => {
+            edit!(|e: &mut Engine| e.stamp_signature(page, rect, &art, ink))
         }
         Request::Close => {
             st.engine = None;
