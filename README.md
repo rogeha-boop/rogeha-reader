@@ -17,6 +17,8 @@ and the AI assistant are planned (see [PLAN.md](PLAN.md)).
 - **Comments that other PDF readers understand**: select text to highlight, underline or strike it out,
   add sticky notes, edit or delete comments, and see them all in the Comments panel. They are saved as
   standard PDF annotations, so Acrobat, Edge, Foxit, Preview and others show and edit them too
+- **OCR** (Pages menu): makes scanned PDFs searchable and selectable by adding an invisible text layer;
+  the pages look exactly the same. Language data is downloaded once per language, then it works offline
 - **Compress scanned PDFs** (Pages menu) into a smaller copy with no visible quality loss; text and
   black-and-white pages are kept exactly, and the original file is never changed
 - Select and copy text (drag, then Copy or Ctrl+C)

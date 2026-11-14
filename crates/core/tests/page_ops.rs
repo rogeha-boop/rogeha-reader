@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use mupdf::Size;
 use mupdf::pdf::PdfDocument;
-use rogeha_core::{AnnotKind, Engine, MarkupKind, Preset, compress_pdf};
+use rogeha_core::{AnnotKind, Engine, MarkupKind, Preset, compress_pdf, ocr_pdf};
 
 const A: (f32, f32) = (595.0, 842.0);
 const B: (f32, f32) = (300.0, 400.0);
@@ -319,4 +319,74 @@ fn compressing_a_scan_shrinks_it_and_keeps_it_readable() {
     drop((a, b));
     std::fs::remove_file(scan).unwrap();
     std::fs::remove_file(out).unwrap();
+}
+
+#[test]
+fn ocr_refuses_bad_requests_before_touching_anything() {
+    let path = text_fixture("ocr-args");
+    let out = path.with_extension("ocr.pdf");
+    let empty_dir = std::env::temp_dir().join("rogeha-reader-tests");
+    // No language data in that folder: a clear error, and no output file.
+    let e = ocr_pdf(&path, &out, "eng", &empty_dir, |_, _| {}).unwrap_err();
+    assert!(e.contains("not installed"), "{e}");
+    assert!(ocr_pdf(&path, &path, "eng", &empty_dir, |_, _| {}).is_err());
+    assert!(!out.exists());
+    std::fs::remove_file(path).unwrap();
+}
+
+/// Full OCR run. Needs Tesseract language data, so it only runs when ROGEHA_TESSDATA points
+/// at a folder with eng.traineddata:
+///     ROGEHA_TESSDATA=/path/to/tessdata cargo test --release -p rogeha-core ocr
+#[test]
+fn ocr_adds_a_text_layer_that_matches_the_picture() {
+    let Some(data) = std::env::var_os("ROGEHA_TESSDATA") else {
+        eprintln!("skipped: ROGEHA_TESSDATA is not set");
+        return;
+    };
+    // A page that is only a picture of text: render the text fixture and wrap the image in a PDF.
+    use mupdf::pdf::{InsertImageOptions, PageImageSource};
+    let source = text_fixture("ocr-src");
+    let rendered = Engine::open(&source).unwrap().render(0, 300.0 / 72.0).unwrap();
+    let mut pix = mupdf::Pixmap::new_with_w_h(&mupdf::Colorspace::device_rgb(), rendered.width as i32, rendered.height as i32, false).unwrap();
+    let stride = pix.stride() as usize;
+    for (i, p) in rendered.pixels.iter().enumerate() {
+        let (x, y) = (i % rendered.width, i / rendered.width);
+        let o = y * stride + x * 3;
+        pix.samples_mut()[o..o + 3].copy_from_slice(&[(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+    }
+    let mut doc = PdfDocument::new();
+    let mut page = doc.new_page(Size::A4).unwrap();
+    page.insert_image(&mut doc, mupdf::Rect::new(0.0, 0.0, 595.0, 842.0), PageImageSource::Pixmap(&pix), InsertImageOptions::default()).unwrap();
+    drop(page);
+    let scan = source.with_extension("scan.pdf");
+    doc.save(scan.to_str().unwrap()).unwrap();
+    drop(doc);
+
+    let before = Engine::open(&scan).unwrap();
+    assert_eq!(before.page_text(0).unwrap().trim(), "", "the scan must start without text");
+    let out = scan.with_extension("ocr.pdf");
+    let mut calls = 0;
+    let stats = ocr_pdf(&scan, &out, "eng", data.as_ref(), |_, _| calls += 1).unwrap();
+    assert_eq!((stats.pages, stats.pages_recognised, stats.pages_with_text, calls), (1, 1, 0, 1));
+
+    let after = Engine::open(&out).unwrap();
+    assert_eq!(after.page_text(0).unwrap().split_whitespace().collect::<Vec<_>>(), ["Hello", "annotated", "world"]);
+    // The words sit where the picture shows them: selecting along the printed line finds them,
+    // and a search hit covers the printed word (baseline at y = 142, see text_fixture).
+    assert_eq!(after.select_text(0, (70.0, 135.0), (400.0, 135.0)).unwrap().text, "Hello annotated world");
+    let hit = after.search_page(0, "annotated").unwrap()[0];
+    let (top, bottom) = (hit[0].1.min(hit[1].1), hit[2].1.max(hit[3].1));
+    assert!(top < 135.0 && bottom > 135.0 && top > 110.0 && bottom < 160.0, "hit spans {top}..{bottom}");
+    assert!((hit[0].0 - 139.0).abs() < 6.0, "hit starts at x = {}", hit[0].0);
+    // The page still looks exactly the same.
+    assert!(before.render(0, 1.0).unwrap().pixels == after.render(0, 1.0).unwrap().pixels);
+    // Running OCR again finds the text layer and leaves the page alone.
+    let again = out.with_extension("again.pdf");
+    let stats = ocr_pdf(&out, &again, "eng", data.as_ref(), |_, _| {}).unwrap();
+    assert_eq!((stats.pages_recognised, stats.pages_with_text), (0, 1));
+
+    drop((before, after));
+    for f in [source, scan, out, again] {
+        std::fs::remove_file(f).unwrap();
+    }
 }

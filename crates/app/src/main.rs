@@ -18,6 +18,10 @@ fn main() {
     if args.get(1).is_some_and(|a| a == "--compress") {
         std::process::exit(compress_helper(&args[2..]));
     }
+    // Helper mode: `rogeha-reader --ocr <in.pdf> <out.pdf> <language> <language data folder>`.
+    if args.get(1).is_some_and(|a| a == "--ocr") {
+        std::process::exit(ocr_helper(&args[2..]));
+    }
 
     let mut file: Option<PathBuf> = None;
     let mut bench = false;
@@ -85,6 +89,44 @@ fn compress_helper(args: &[std::ffi::OsString]) -> i32 {
                     "pages": stats.pages,
                     "pages_restored": stats.pages_restored,
                     "images_untouched": stats.images_untouched,
+                })
+            );
+            0
+        }
+        Err(message) => {
+            println!("{}", serde_json::json!({ "ok": false, "error": message }));
+            1
+        }
+    }
+}
+
+/// Runs OCR on one file. Prints a JSON line per page for progress, then the result.
+fn ocr_helper(args: &[std::ffi::OsString]) -> i32 {
+    use std::io::Write;
+    let [input, output, language, data_dir] = args else {
+        println!("{}", serde_json::json!({ "ok": false, "error": "Usage: rogeha-reader --ocr <in.pdf> <out.pdf> <language> <data folder>" }));
+        return 1;
+    };
+    let result = rogeha_core::ocr_pdf(
+        input.as_ref(),
+        output.as_ref(),
+        &language.to_string_lossy(),
+        data_dir.as_ref(),
+        |done, total| {
+            println!("{}", serde_json::json!({ "page": done, "of": total }));
+            let _ = std::io::stdout().flush();
+        },
+    );
+    match result {
+        Ok(stats) => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "ok": true,
+                    "pages": stats.pages,
+                    "recognised": stats.pages_recognised,
+                    "with_text": stats.pages_with_text,
+                    "words": stats.words,
                 })
             );
             0

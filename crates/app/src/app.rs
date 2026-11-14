@@ -16,6 +16,7 @@ use crate::theme;
 mod about;
 mod comments;
 mod compress;
+mod ocr;
 
 /// PDF points (1/72") to screen pixels at 100% zoom (96 dpi).
 const PT_TO_PX: f32 = 96.0 / 72.0;
@@ -123,6 +124,7 @@ pub struct ReaderApp {
     comments: comments::Comments,
     compress: compress::CompressUi,
     about: about::About,
+    ocr: ocr::OcrUi,
     ai: AiPanel,
     message: Option<(String, Instant, bool)>,
     after_save: AfterSave,
@@ -189,6 +191,7 @@ impl ReaderApp {
             comments: comments::Comments::default(),
             compress: compress::CompressUi::default(),
             about: about::About::default(),
+            ocr: ocr::OcrUi::default(),
             ai: AiPanel::default(),
             message: None,
             after_save: AfterSave::Nothing,
@@ -836,6 +839,10 @@ impl ReaderApp {
                         self.add_pdfs(true);
                     }
                     ui.separator();
+                    if ui.button("Recognize text (OCR)…").on_hover_text("Make a scanned PDF searchable").clicked() {
+                        ui.close();
+                        self.ocr.open = true;
+                    }
                     if ui.button("Compress PDF…").on_hover_text("Make a smaller copy of a scanned PDF").clicked() {
                         ui.close();
                         self.compress.open = true;
@@ -1247,7 +1254,8 @@ impl ReaderApp {
             && !self.opening
             && self.last_want.is_empty()
             && !self.search.busy
-            && !self.compress_busy();
+            && !self.compress_busy()
+            && !self.ocr_busy();
         if !idle {
             self.dev_wait = 0;
             return;
@@ -1300,6 +1308,17 @@ impl ReaderApp {
                     }),
                     "comments" => self.comments.panel_open = true,
                     "about" => self.about.open = true,
+                    "ocrdownload" => {
+                        self.ocr.open = true;
+                        self.ocr_download_missing(ctx);
+                    }
+                    // ocr=<output path>, or just "ocr" to show the dialog
+                    "ocr" => {
+                        self.ocr.open = true;
+                        if !arg.is_empty() {
+                            self.start_ocr(ctx, Some(PathBuf::from(arg)));
+                        }
+                    }
                     "light" => ctx.set_theme(egui::Theme::Light),
                     "dark" => ctx.set_theme(egui::Theme::Dark),
                     // compress=<output path>
@@ -1407,6 +1426,7 @@ impl ReaderApp {
         self.comment_editor(&ctx);
         self.compress_window(&ctx);
         self.about_window(&ctx);
+        self.ocr_window(&ctx);
         self.run_dev(&ctx);
         self.finish_bench(&ctx);
     }
