@@ -751,19 +751,19 @@ impl ReaderApp {
         };
 
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Open").on_hover_text("Open a file (Ctrl+O)").clicked() {
+            if icons::icon_button(ui, Icon::Open, false, true).on_hover_text("Open a file (Ctrl+O)").clicked() {
                 self.open_dialog();
             }
-            if ui
-                .add_enabled(self.is_dirty(), egui::Button::new("Save"))
+            if icons::icon_button(ui, Icon::Save, false, self.is_dirty())
                 .on_hover_text("Save changes into the file (Ctrl+S)")
+                .on_disabled_hover_text("Save (nothing to save yet)")
                 .clicked()
             {
                 self.save();
             }
-            if ui
-                .add_enabled(can_edit, egui::Button::new("Save as"))
-                .on_hover_text("Save a copy (Ctrl+Shift+S)")
+            if icons::icon_button(ui, Icon::SaveAs, false, can_edit)
+                .on_hover_text("Save as: save a copy under a new name (Ctrl+Shift+S)")
+                .on_disabled_hover_text("Save as")
                 .clicked()
             {
                 self.save_as();
@@ -771,11 +771,11 @@ impl ReaderApp {
 
             ui.separator();
 
-            if ui.add_enabled(has_doc, egui::Button::new("-")).on_hover_text("Zoom out (Ctrl -)").clicked() {
+            if icons::icon_button(ui, Icon::ZoomOut, false, has_doc).on_hover_text("Zoom out (Ctrl -)").clicked() {
                 self.zoom_step(false);
             }
-            ui.label(format!("{:.0}%", self.zoom * 100.0));
-            if ui.add_enabled(has_doc, egui::Button::new("+")).on_hover_text("Zoom in (Ctrl +)").clicked() {
+            ui.label(format!("{:.0}%", self.zoom * 100.0)).on_hover_text("Zoom");
+            if icons::icon_button(ui, Icon::ZoomIn, false, has_doc).on_hover_text("Zoom in (Ctrl +)").clicked() {
                 self.zoom_step(true);
             }
             if icons::icon_button(ui, Icon::FitWidth, self.fit == Fit::Width, has_doc)
@@ -808,8 +808,11 @@ impl ReaderApp {
             {
                 self.rotate(vec![page], 90);
             }
-            ui.add_enabled_ui(can_edit, |ui| {
-                ui.menu_button("Pages", |ui| {
+            {
+                let pages_button = icons::icon_button(ui, Icon::Pages, false, can_edit)
+                    .on_hover_text("Pages: move, merge, delete, OCR, compress")
+                    .on_disabled_hover_text(edit_hint);
+                egui::Popup::menu(&pages_button).show(|ui| {
                     if ui.button("Rotate all pages left").clicked() {
                         self.rotate((0..n).collect(), -90);
                         ui.close();
@@ -854,29 +857,26 @@ impl ReaderApp {
                         self.delete_current();
                         ui.close();
                     }
-                })
-                .response
-                .on_disabled_hover_text(edit_hint);
-            });
+                });
+            }
 
             ui.separator();
 
-            if ui
-                .add_enabled(can_edit, egui::Button::new("Sign").selected(self.sign.open || self.sign.placing.is_some()))
-                .on_hover_text("Add your signature to a page")
+            if icons::icon_button(ui, Icon::Sign, self.sign.open || self.sign.placing.is_some(), can_edit)
+                .on_hover_text("Sign: add your signature, or sign with a certificate")
                 .on_disabled_hover_text(edit_hint)
                 .clicked()
             {
                 self.sign.placing = None;
                 self.sign.open = !self.sign.open;
             }
-            let label = match self.comments.list.len() {
-                0 => "Comments".to_owned(),
-                n => format!("Comments ({n})"),
+            // The number of comments is shown next to the icon.
+            let count = match self.comments.list.len() {
+                0 => String::new(),
+                n => n.to_string(),
             };
-            if ui
-                .add_enabled(has_doc, egui::Button::new(label).selected(self.comments.panel_open))
-                .on_hover_text("Show the list of comments")
+            if icons::icon_button_with_text(ui, Icon::Comments, &count, self.comments.panel_open, has_doc)
+                .on_hover_text("Comments: list, add a note")
                 .clicked()
             {
                 self.comments.panel_open = !self.comments.panel_open;
@@ -884,18 +884,17 @@ impl ReaderApp {
 
             ui.separator();
 
-            if ui.add_enabled(has_doc, egui::Button::new("Find")).on_hover_text("Search the document (Ctrl+F)").clicked() {
+            if icons::icon_button(ui, Icon::Find, self.search.open, has_doc).on_hover_text("Find in the document (Ctrl+F)").clicked() {
                 self.search.open = !self.search.open;
                 self.search.focus = self.search.open;
             }
-            if ui
-                .add(egui::Button::new("AI").selected(self.assistant.open))
-                .on_hover_text("Open the AI assistant (loaded only when opened)")
+            if icons::icon_button(ui, Icon::Assistant, self.assistant.open, true)
+                .on_hover_text("AI assistant")
                 .clicked()
             {
                 self.assistant.open = !self.assistant.open;
             }
-            if ui.button("About").on_hover_text("About Rogeha Reader").clicked() {
+            if icons::icon_button(ui, Icon::About, self.about.open, true).on_hover_text("About Rogeha Reader").clicked() {
                 self.about.open = true;
             }
         });
