@@ -12,6 +12,8 @@ AI assistant work; offline translation is planned (see [PLAN.md](PLAN.md)).
 - Opens **PDF, EPUB, CBZ, XPS, FB2, MOBI** (everything MuPDF reads)
 - Continuous scrolling; pages render in a background thread, only the visible ones plus a little read-ahead
 - Zoom (Ctrl + wheel, Ctrl +/-), fit width, fit page, go to page
+- **Two-page view** (View menu): pairs starting at page 1, or with the cover alone on the right like a
+  printed magazine (1, 2-3, 4-5, …); **full screen** with F11
 - **Rotate pages and save the rotation into the PDF**, delete pages, move pages, save / save as
 - **Combine PDFs**: add the pages of other PDF files at the end or after the current page (Pages menu)
 - **Comments that other PDF readers understand**: select text to highlight, underline or strike it out,
@@ -55,6 +57,8 @@ The Rogeha Studio name, banner and app icon are the studio's brand and are not c
 | Ctrl+0 / Ctrl+1 | Fit width / 100% |
 | PgUp, PgDn, Space, arrows, Home, End | Move around |
 | R / Shift+R | Rotate the current page right / left |
+| F11 | Full screen on / off (Esc also leaves it) |
+| Left / Right | Previous / next page, or spread in two-page view |
 | Ctrl+F, Enter, F3 / Shift+F3 | Find, next / previous match |
 
 ## The assistant and your data

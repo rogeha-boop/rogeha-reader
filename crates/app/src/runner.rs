@@ -121,6 +121,11 @@ impl Runner {
                         gfx.window.request_redraw();
                     }
                     ViewportCommand::CancelClose => cancel_close = true,
+                    ViewportCommand::Fullscreen(on) => {
+                        // Borderless full screen on the monitor the window is on.
+                        gfx.window.set_fullscreen(on.then_some(winit::window::Fullscreen::Borderless(None)));
+                        gfx.window.request_redraw();
+                    }
                     ViewportCommand::Screenshot(callback) => screenshots.push(callback),
                     _ => {}
                 }

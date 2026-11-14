@@ -52,6 +52,39 @@ pub struct PageLayer {
     pub pages: Vec<(Rect, Option<Arc<PageImage>>)>,
 }
 
+/// How pages are laid out.
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum ViewMode {
+    /// One page per row.
+    Single,
+    /// Two pages side by side, starting with pages 1 and 2 (page 1 is a left-hand page).
+    Spread,
+    /// Two pages side by side like a printed magazine or book: page 1 stands alone on the
+    /// right as the cover, then 2-3, 4-5, ... so even pages are on the left.
+    SpreadCover,
+}
+
+/// The rows of a layout: the page on the left and the page on the right (either may be
+/// missing). In single-page view every row holds one page, stored on the left.
+fn layout_rows(count: usize, view: ViewMode) -> Vec<[Option<usize>; 2]> {
+    let pair = |left: usize| [Some(left), (left + 1 < count).then_some(left + 1)];
+    match view {
+        ViewMode::Single => (0..count).map(|p| [Some(p), None]).collect(),
+        ViewMode::Spread => (0..count).step_by(2).map(pair).collect(),
+        ViewMode::SpreadCover => {
+            let mut rows = Vec::new();
+            if count > 0 {
+                rows.push([None, Some(0)]);
+            }
+            rows.extend((1..count).step_by(2).map(pair));
+            rows
+        }
+    }
+}
+
+/// Gap between the two pages of a spread, in screen points.
+const SPREAD_GAP: f32 = 4.0;
+
 #[derive(PartialEq, Clone, Copy)]
 enum Fit {
     Width,
@@ -105,7 +138,15 @@ pub struct ReaderApp {
 
     // Layout cache: top of each page in content coordinates (egui points).
     tops: Vec<f32>,
-    layout_for: (u64, u32),
+    /// Left edge of each page relative to the centre line of the view, at the current zoom.
+    lefts: Vec<f32>,
+    rows: Vec<[Option<usize>; 2]>,
+    view: ViewMode,
+    fullscreen: bool,
+    /// The fit mode to return to when full screen ends, and when its hint disappears.
+    fit_before_fullscreen: Fit,
+    fullscreen_since: Option<Instant>,
+    layout_for: (u64, u32, ViewMode),
     content_size: Vec2,
 
     current_page: usize,
@@ -179,7 +220,13 @@ impl ReaderApp {
             failed: HashSet::new(),
             last_want: Vec::new(),
             tops: Vec::new(),
-            layout_for: (u64::MAX, 0),
+            lefts: Vec::new(),
+            rows: Vec::new(),
+            view: ViewMode::Single,
+            fullscreen: false,
+            fit_before_fullscreen: Fit::Width,
+            fullscreen_since: None,
+            layout_for: (u64::MAX, 0, ViewMode::Single),
             content_size: Vec2::ZERO,
             current_page: 0,
             scroll_offset: Vec2::ZERO,
@@ -333,6 +380,41 @@ impl ReaderApp {
             self.current_page = page;
         } else {
             self.pending_page = Some(page);
+        }
+    }
+
+    /// Go to the next or previous row: one page in single view, one spread in two-page view.
+    fn step_row(&mut self, forward: bool) {
+        let Some(row) = self.rows.iter().position(|r| r.contains(&Some(self.current_page))) else { return };
+        let target = if forward { row + 1 } else { row.saturating_sub(1) };
+        if let Some(page) = self.rows.get(target).and_then(|r| r[0].or(r[1])) {
+            self.go_to_page(page);
+        }
+    }
+
+    fn set_fullscreen(&mut self, ctx: &egui::Context, on: bool) {
+        if on == self.fullscreen {
+            return;
+        }
+        self.fullscreen = on;
+        ctx.send_viewport_cmd(ViewportCommand::Fullscreen(on));
+        if on {
+            // Full screen shows whole pages; the previous fit comes back afterwards.
+            self.fit_before_fullscreen = self.fit;
+            self.fit = Fit::Page;
+            self.fullscreen_since = Some(Instant::now());
+        } else {
+            self.fit = self.fit_before_fullscreen;
+            self.fullscreen_since = None;
+        }
+        self.pending_page = Some(self.current_page);
+        self.layout_for.0 = u64::MAX; // lay out again
+    }
+
+    fn set_view(&mut self, view: ViewMode) {
+        if view != self.view {
+            self.view = view;
+            self.pending_page = Some(self.current_page);
         }
     }
 
@@ -634,6 +716,12 @@ impl ReaderApp {
             self.set_zoom(self.zoom * zoom_delta, Fit::Custom);
         }
 
+        if hit(Modifiers::NONE, Key::F11) {
+            self.set_fullscreen(ctx, !self.fullscreen);
+        }
+        if self.fullscreen && !self.search.open && hit(Modifiers::NONE, Key::Escape) {
+            self.set_fullscreen(ctx, false);
+        }
         if self.search.open && hit(Modifiers::NONE, Key::Escape) {
             self.search.open = false;
         }
@@ -666,10 +754,10 @@ impl ReaderApp {
             self.scroll_by(-60.0);
         }
         if hit(Modifiers::NONE, Key::ArrowRight) {
-            self.go_to_page(self.current_page + 1);
+            self.step_row(true);
         }
         if hit(Modifiers::NONE, Key::ArrowLeft) {
-            self.go_to_page(self.current_page.saturating_sub(1));
+            self.step_row(false);
         }
         if hit(Modifiers::NONE, Key::Home) {
             self.go_to_page(0);
@@ -742,6 +830,26 @@ impl ReaderApp {
             {
                 self.fit = Fit::Page;
             }
+
+            let view = icons::menu_button(ui, "View", has_doc).on_hover_text("Page layout and full screen");
+            egui::Popup::menu(&view).show(|ui| {
+                let mut choice = self.view;
+                ui.radio_value(&mut choice, ViewMode::Single, "One page");
+                ui.radio_value(&mut choice, ViewMode::Spread, "Two pages (1-2, 3-4, …)")
+                    .on_hover_text("Page 1 is a left-hand page");
+                ui.radio_value(&mut choice, ViewMode::SpreadCover, "Two pages, cover alone (1, 2-3, 4-5, …)")
+                    .on_hover_text("Like a printed magazine: page 1 is the cover on the right");
+                if choice != self.view {
+                    self.set_view(choice);
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button(if self.fullscreen { "Leave full screen (F11)" } else { "Full screen (F11)" }).clicked() {
+                    let on = !self.fullscreen;
+                    self.set_fullscreen(ui.ctx(), on);
+                    ui.close();
+                }
+            });
 
             ui.separator();
 
@@ -935,36 +1043,59 @@ impl ReaderApp {
         if doc.page_sizes.is_empty() {
             return;
         }
+        let generation = doc.generation;
+        let sizes = &doc.page_sizes.clone();
+        let rows = layout_rows(sizes.len(), self.view);
+        let two_up = self.view != ViewMode::Single;
+        let gutter = if two_up { SPREAD_GAP } else { 0.0 };
+        // Width of a row in points. In a spread each side gets the wider page's width, so the
+        // line between the pages stays in the middle even when one side is empty (the cover).
+        let row_width = |row: &[Option<usize>; 2]| {
+            let w = |p: Option<usize>| p.map_or(0.0, |p| sizes[p].0);
+            if two_up { 2.0 * w(row[0]).max(w(row[1])) } else { w(row[0]) }
+        };
+        let row_height = |row: &[Option<usize>; 2]| row.iter().flatten().map(|p| sizes[*p].1).fold(1.0, f32::max);
+        let max_w = rows.iter().map(row_width).fold(1.0, f32::max);
+
         // Fit modes follow the window size.
-        let max_w = doc.page_sizes.iter().map(|s| s.0).fold(1.0, f32::max);
         let scrollbar = 14.0;
         match self.fit {
             Fit::Width => {
-                let z = (avail.x - 2.0 * MARGIN - scrollbar) / (max_w * PT_TO_PX);
+                let z = (avail.x - 2.0 * MARGIN - scrollbar - gutter) / (max_w * PT_TO_PX);
                 self.set_zoom(z, Fit::Width);
             }
             Fit::Page => {
-                let (w, h) = doc.page_sizes[self.current_page.min(doc.page_sizes.len() - 1)];
-                let zw = (avail.x - 2.0 * MARGIN - scrollbar) / (w * PT_TO_PX);
-                let zh = (avail.y - 2.0 * PAGE_GAP) / (h * PT_TO_PX);
+                let current = self.current_page.min(sizes.len() - 1);
+                let row = rows.iter().find(|r| r.contains(&Some(current))).copied().unwrap_or([Some(current), None]);
+                let zw = (avail.x - 2.0 * MARGIN - scrollbar - gutter) / (row_width(&row) * PT_TO_PX);
+                let zh = (avail.y - 2.0 * PAGE_GAP) / (row_height(&row) * PT_TO_PX);
                 self.set_zoom(zw.min(zh), Fit::Page);
             }
             Fit::Custom => {}
         }
 
-        let doc = self.doc.as_ref().unwrap();
-        let key = (doc.generation, (self.zoom * 10_000.0) as u32);
-        if self.layout_for == key && self.tops.len() == doc.page_sizes.len() {
+        let key = (generation, (self.zoom * 10_000.0) as u32, self.view);
+        if self.layout_for == key && self.tops.len() == sizes.len() {
             return;
         }
         let scale = self.zoom * PT_TO_PX;
         let mut y = PAGE_GAP;
-        self.tops.clear();
-        for &(_, h) in &doc.page_sizes {
-            self.tops.push(y);
-            y += h * scale + PAGE_GAP;
+        self.tops = vec![0.0; sizes.len()];
+        self.lefts = vec![0.0; sizes.len()];
+        for row in &rows {
+            if let Some(left) = row[0] {
+                self.tops[left] = y;
+                // Single view: centred. Spread: its right edge sits at the gutter.
+                self.lefts[left] = if two_up { -gutter / 2.0 - sizes[left].0 * scale } else { -sizes[left].0 * scale / 2.0 };
+            }
+            if let Some(right) = row[1] {
+                self.tops[right] = y;
+                self.lefts[right] = gutter / 2.0;
+            }
+            y += row_height(row) * scale + PAGE_GAP;
         }
-        self.content_size = Vec2::new(max_w * scale + 2.0 * MARGIN, y);
+        self.content_size = Vec2::new(max_w * scale + gutter + 2.0 * MARGIN, y);
+        self.rows = rows;
         self.layout_for = key;
         if let Some(page) = self.pending_page.take() {
             self.go_to_page(page);
@@ -995,10 +1126,11 @@ impl ReaderApp {
             let origin = content.min;
             let painter = ui.painter();
 
+            // Start one row early: in a spread two pages share a top.
             let first = self
                 .tops
                 .partition_point(|&top| top < viewport.min.y)
-                .saturating_sub(1);
+                .saturating_sub(2);
             for page in first..n {
                 let top = self.tops[page];
                 if top > viewport.max.y {
@@ -1009,7 +1141,7 @@ impl ReaderApp {
                 if top + h < viewport.min.y {
                     continue;
                 }
-                let x = ((size.x - w) * 0.5).max(MARGIN);
+                let x = size.x * 0.5 + self.lefts[page];
                 let rect = Rect::from_min_size(origin + Vec2::new(x, top), Vec2::new(w, h));
                 visible.push(page);
                 let response = ui.interact(rect, ui.scope_id().with(("page", page)), Sense::click_and_drag());
@@ -1049,7 +1181,11 @@ impl ReaderApp {
 
             // The current page is the one under a line 30% down the view.
             let probe = viewport.min.y + viewport.height() * 0.3;
-            let current = self.tops.partition_point(|&top| top <= probe).saturating_sub(1);
+            let mut current = self.tops.partition_point(|&top| top <= probe).saturating_sub(1);
+            // In a spread, the current page is the left one of its row.
+            while current > 0 && self.tops[current - 1] == self.tops[current] {
+                current -= 1;
+            }
             (current, viewport.size())
         });
         let (current, viewport_size) = out.inner;
@@ -1208,6 +1344,13 @@ impl ReaderApp {
                     }),
                     "comments" => self.comments.panel_open = true,
                     "pages" => self.pages.open = true,
+                    // view=single | spread | cover
+                    "view" => self.set_view(match arg {
+                        "spread" => ViewMode::Spread,
+                        "cover" => ViewMode::SpreadCover,
+                        _ => ViewMode::Single,
+                    }),
+                    "fullscreen" => self.set_fullscreen(ctx, true),
                     // reorder=2,5>1: move pages 2 and 5 in front of page 1
                     "reorder" => self.dev_reorder(arg),
                     // author=<name>: comment as this person
@@ -1311,24 +1454,38 @@ impl ReaderApp {
         self.drain_events(&ctx);
         self.handle_input(&ctx);
 
-        egui::Panel::top("toolbar").show(ui, |ui| {
-            ui.add_space(3.0);
-            self.toolbar(ui);
-            ui.add_space(3.0);
-        });
-        egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
+        // Full screen: only the document. F11 or Esc brings everything back.
+        let chrome = !self.fullscreen;
+        if chrome {
+            egui::Panel::top("toolbar").show(ui, |ui| {
+                ui.add_space(3.0);
+                self.toolbar(ui);
+                ui.add_space(3.0);
+            });
+            egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
+        } else if self.fullscreen_since.is_some_and(|t| t.elapsed() < Duration::from_secs(4)) {
+            egui::Area::new(egui::Id::unique("fullscreen-hint"))
+                .order(egui::Order::Foreground)
+                .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 16.0))
+                .show(&ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.label("Full screen. Press Esc or F11 to leave; arrow keys turn pages.");
+                    });
+                });
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
         self.pages.want.clear();
-        if self.pages.open && self.doc.is_some() {
+        if chrome && self.pages.open && self.doc.is_some() {
             egui::Panel::left("pages")
                 .default_size(190.0)
                 .show(ui, |ui| self.pages_panel(ui));
         }
-        if self.comments.panel_open && self.doc.is_some() {
+        if chrome && self.comments.panel_open && self.doc.is_some() {
             egui::Panel::left("comments")
                 .default_size(280.0)
                 .show(ui, |ui| self.comments_panel(ui));
         }
-        if self.assistant.open {
+        if chrome && self.assistant.open {
             egui::Panel::right("assistant")
                 .default_size(360.0)
                 .show(ui, |ui| self.assistant_panel(ui));
@@ -1418,4 +1575,21 @@ fn app_data_dir() -> PathBuf {
     std::env::var_os("ROGEHA_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| base.unwrap_or_else(std::env::temp_dir).join("Rogeha Reader"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ViewMode, layout_rows};
+
+    #[test]
+    fn spreads_pair_pages_the_way_a_magazine_does() {
+        let s = Some;
+        assert_eq!(layout_rows(3, ViewMode::Single), vec![[s(0), None], [s(1), None], [s(2), None]]);
+        // Starting with a left-hand page: 1-2, 3-4, and a last page alone on the left.
+        assert_eq!(layout_rows(5, ViewMode::Spread), vec![[s(0), s(1)], [s(2), s(3)], [s(4), None]]);
+        // Cover alone on the right, then 2-3, 4-5, 6 alone on the left.
+        assert_eq!(layout_rows(6, ViewMode::SpreadCover), vec![[None, s(0)], [s(1), s(2)], [s(3), s(4)], [s(5), None]]);
+        assert_eq!(layout_rows(1, ViewMode::SpreadCover), vec![[None, s(0)]]);
+        assert!(layout_rows(0, ViewMode::SpreadCover).is_empty());
+    }
 }
