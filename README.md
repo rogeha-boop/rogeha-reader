@@ -1,7 +1,8 @@
 # Rogeha Reader
 
 A fast, free, open-source PDF and EPUB reader for Windows, written in Rust on the
-[MuPDF](https://mupdf.com) engine. Native GUI (egui), no Electron, no web view.
+[MuPDF](https://mupdf.com) engine. Native GUI (egui) drawn on the CPU: no Electron, no web view,
+no GPU driver.
 
 **Status: early first version.** Viewing and page editing work; signing, OCR, translation and the
 AI assistant are planned (see [PLAN.md](PLAN.md)).

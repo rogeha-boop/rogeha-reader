@@ -20,7 +20,7 @@ rogeha-reader (workspace)
 │     page cache (LRU of rendered pixmaps, keyed by page/zoom/rotation)
 │     page ops: rotate (saved into /Rotate), delete, move, save / save-as
 │     text: search, page text (for selection, translation, AI context)
-├── crates/app     rogeha-reader.exe: egui/eframe GUI (glow/OpenGL backend)
+├── crates/app     rogeha-reader.exe: egui GUI, drawn on the CPU (winit + softbuffer)
 │     continuous vertical scroll, lazy page requests for visible pages only
 │     zoom, fit-width, go-to-page, thumbnails sidebar (later), keyboard shortcuts
 │     page organizer actions (rotate/delete/move), dirty tracking, save prompts
@@ -36,9 +36,13 @@ Why these choices:
   pages, image insertion, signature widgets, text pages and search. It builds MuPDF from source with
   MSBuild on Windows, so no prebuilt DLLs are needed. Missing pieces (PKCS#7 signing callbacks,
   OCR device) go through the raw `mupdf-sys` FFI that comes with it.
-- **egui/eframe + glow**: native, immediate-mode, one small exe, no web view. Glow (OpenGL) starts
-  faster and uses less memory than wgpu. Alternatives considered: iced (heavier, async-first),
-  Slint (good, but a DSL and a GPL/royalty licensing split), native Win32 (fastest, but not portable).
+- **egui, drawn on the CPU**: native, immediate-mode, one small exe, no web view, and no GPU.
+  The first version used eframe with OpenGL; the graphics driver alone cost 60-100 MB of memory
+  and ~0.2 s of startup. Now winit opens the window, a software rasteriser draws the UI, and
+  softbuffer hands the finished frame to the OS. MuPDF renders pages on the CPU anyway, and
+  their pixels are copied straight into the frame, so each rendered page is in memory once.
+  Alternatives considered: iced (heavier, async-first), Slint (good, but a DSL and a
+  GPL/royalty licensing split), native Win32 (fastest, but not portable).
 - **AI agent as a separate process**: none of the HTTP/TLS/JSON code is linked into the reader,
   so it has zero cost at startup and none while reading. The process starts only when you open the AI panel.
 
@@ -98,10 +102,12 @@ Planned, in this order:
 
 ## Known gaps in the first version
 
-- **Memory is not yet SumatraPDF-class.** Measured on a high-DPI screen: about 83 MB for an empty
-  window and 100-190 MB with a document. Most of it is the OpenGL driver plus page textures.
-  Options: render straight to a software surface (no GPU driver in the process), tile and
-  down-res off-screen pages, cap MuPDF's object store.
+- **Memory is much better but still above SumatraPDF.** Measured on a high-DPI screen
+  (2200 x 1640 px window): 47 MB for an empty window, 75-140 MB with a document. What is left
+  is mostly pixels: the window frame is held twice (2 x 14 MB) and three rendered pages are kept
+  (about 15 MB each at this resolution). On a normal 1080p screen these are about a quarter
+  the size. Next steps: keep pages as 3 bytes per pixel or only the visible tiles, drop the
+  rasteriser's second frame copy, and render only the visible part at high zoom.
 - **System fonts are off.** mupdf-rs's `system-fonts` feature (font-kit) hangs on Windows when
   opening EPUBs, so it is disabled. PDFs that don't embed their fonts, and EPUB text in scripts
   outside the built-in fonts (CJK, Arabic, emoji...), fall back to the base-14 fonts or show
@@ -110,12 +116,13 @@ Planned, in this order:
 - Password-protected files are refused; no text selection/copy, outline/bookmarks sidebar,
   thumbnails, links, printing, or session restore yet.
 - Search runs over the whole document on the document thread, so rendering waits on very
-  large files; very high zoom is limited by an 8192 px texture cap (needs tiling).
+  large files; above about 12 megapixels per page (very high zoom) the page is upscaled
+  instead of re-rendered (needs tile rendering).
 - A full rewrite after deleting pages can make some files slightly larger (object streams are
   unpacked); the compression milestone fixes this.
 
 ## Performance targets
 
-- Window visible and first page drawn in well under 0.5 s on a normal PDF (measured: 0.25-0.55 s).
+- Window visible and first page drawn in well under 0.5 s on a normal PDF (measured: 0.12-0.4 s).
 - Memory in the tens of MB for normal documents (page cache capped by bytes).
 - OCR, translation and AI never touch the startup path.
