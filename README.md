@@ -130,3 +130,9 @@ Windows does not let a program make itself the default viewer. The installer, an
 **Tools > Make Rogeha Reader the default PDF viewer** in the reader, open the Default apps page on
 the reader's entry; you confirm the choice there. The installer is not code-signed yet, so
 SmartScreen may ask before running it.
+
+On current Windows 11 builds the "Select an app" window may not offer a freshly installed
+Rogeha Reader, although it is registered for the file types. In that case right-click a PDF,
+choose **Open with > Choose another app > Choose an app on your PC**, pick `rogeha-reader.exe` in
+`%LOCALAPPDATA%\Programs\Rogeha Reader`, and confirm with **Always**. After that Windows lists
+the reader. Repeat once for EPUB if you want it there too.

@@ -109,10 +109,15 @@ mod win {
         if silent {
             return 0;
         }
-        let question = "Rogeha Reader is installed. You will find it in the Start menu.\n\n\
+        let question = format!("Rogeha Reader is installed. You will find it in the Start menu.\n\n\
                         Make it your default PDF viewer?\n\n\
-                        Windows will open its Default apps page. Choose Rogeha Reader for .pdf there.";
-        if message(question, MB_YESNO | MB_ICONINFORMATION) == IDYES {
+                        Windows will open its Default apps page. Choose Rogeha Reader for .pdf there.\n\n\
+                        If Windows does not offer Rogeha Reader: right-click a PDF, choose\n\
+                        Open with > Choose another app > Choose an app on your PC,\n\
+                        pick rogeha-reader.exe in
+{}
+\n                        and confirm with Always.", folder.display());
+        if message(&question, MB_YESNO | MB_ICONINFORMATION) == IDYES {
             let _ = Command::new("explorer.exe").arg("ms-settings:defaultapps?registeredAppUser=Rogeha%20Reader").spawn();
         }
         let _ = Command::new(&reader).spawn();

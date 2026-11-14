@@ -237,7 +237,7 @@ mod win {
             .arg("ms-settings:defaultapps?registeredAppUser=Rogeha%20Reader")
             .spawn()
             .map_err(|e| format!("Could not open the Default apps page: {e}"))?;
-        Ok("Windows opened Default apps: choose Rogeha Reader for .pdf there".into())
+        Ok("Windows opened Default apps: choose Rogeha Reader for .pdf there. Not offered? Right-click a PDF > Open with > Choose an app on your PC".into())
     }
 
     fn uninstall(silent: bool) -> i32 {
