@@ -3,6 +3,7 @@
 
 mod agent_host;
 mod app;
+mod icons;
 mod runner;
 mod theme;
 

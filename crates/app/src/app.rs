@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use rogeha_core::{DocInfo, Event, HitQuad, PageImage, RenderKey, Request, Worker};
 
+use crate::icons::{self, Icon};
 use crate::theme;
 
 mod about;
@@ -770,24 +771,6 @@ impl ReaderApp {
 
             ui.separator();
 
-            if ui.add_enabled(has_doc, egui::Button::new("<")).on_hover_text("Previous page").clicked() {
-                self.go_to_page(self.current_page.saturating_sub(1));
-            }
-            let mut page_no = self.current_page + 1;
-            let resp = ui.add_enabled(
-                has_doc,
-                egui::DragValue::new(&mut page_no).range(1..=n.max(1)).speed(0.1),
-            );
-            if resp.changed() && page_no != self.current_page + 1 {
-                self.go_to_page(page_no - 1);
-            }
-            ui.label(format!("/ {n}"));
-            if ui.add_enabled(has_doc, egui::Button::new(">")).on_hover_text("Next page").clicked() {
-                self.go_to_page(self.current_page + 1);
-            }
-
-            ui.separator();
-
             if ui.add_enabled(has_doc, egui::Button::new("-")).on_hover_text("Zoom out (Ctrl -)").clicked() {
                 self.zoom_step(false);
             }
@@ -795,15 +778,14 @@ impl ReaderApp {
             if ui.add_enabled(has_doc, egui::Button::new("+")).on_hover_text("Zoom in (Ctrl +)").clicked() {
                 self.zoom_step(true);
             }
-            if ui
-                .add_enabled(has_doc, egui::Button::new("Fit width").selected(self.fit == Fit::Width))
-                .on_hover_text("Fit the page width (Ctrl+0)")
+            if icons::icon_button(ui, Icon::FitWidth, self.fit == Fit::Width, has_doc)
+                .on_hover_text("Fit width (Ctrl+0)")
                 .clicked()
             {
                 self.fit = Fit::Width;
             }
-            if ui
-                .add_enabled(has_doc, egui::Button::new("Fit page").selected(self.fit == Fit::Page))
+            if icons::icon_button(ui, Icon::FitPage, self.fit == Fit::Page, has_doc)
+                .on_hover_text("Fit whole page")
                 .clicked()
             {
                 self.fit = Fit::Page;
@@ -812,17 +794,15 @@ impl ReaderApp {
             ui.separator();
 
             let page = self.current_page;
-            if ui
-                .add_enabled(can_edit, egui::Button::new("Rotate left"))
-                .on_hover_text("Rotate this page 90° left (Shift+R)")
+            if icons::icon_button(ui, Icon::RotateLeft, false, can_edit)
+                .on_hover_text("Rotate this page left (Shift+R)")
                 .on_disabled_hover_text(edit_hint)
                 .clicked()
             {
                 self.rotate(vec![page], -90);
             }
-            if ui
-                .add_enabled(can_edit, egui::Button::new("Rotate right"))
-                .on_hover_text("Rotate this page 90° right (R)")
+            if icons::icon_button(ui, Icon::RotateRight, false, can_edit)
+                .on_hover_text("Rotate this page right (R)")
                 .on_disabled_hover_text(edit_hint)
                 .clicked()
             {
@@ -971,6 +951,7 @@ impl ReaderApp {
     }
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
+        let mut jump: Option<usize> = None;
         ui.horizontal(|ui| {
             if let Some(doc) = &self.doc {
                 let kind = doc
@@ -978,7 +959,17 @@ impl ReaderApp {
                     .extension()
                     .map(|e| e.to_string_lossy().to_uppercase())
                     .unwrap_or_else(|| "Document".into());
-                ui.label(format!("Page {} of {}", self.current_page + 1, doc.page_sizes.len()));
+                // The page number doubles as "go to page": click it and type, or drag it.
+                let count = doc.page_sizes.len();
+                let mut page_no = self.current_page + 1;
+                ui.label("Page");
+                let field = ui
+                    .add(egui::DragValue::new(&mut page_no).range(1..=count.max(1)).speed(0.1))
+                    .on_hover_text("Click to type a page number");
+                if field.changed() && page_no != self.current_page + 1 {
+                    jump = Some(page_no - 1);
+                }
+                ui.label(format!("of {count}"));
                 ui.separator();
                 ui.label(kind);
                 if doc.dirty {
@@ -1011,6 +1002,9 @@ impl ReaderApp {
                 }
             }
         });
+        if let Some(page) = jump {
+            self.go_to_page(page);
+        }
     }
 
     fn ensure_layout(&mut self, avail: Vec2) {
