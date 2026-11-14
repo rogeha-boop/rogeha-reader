@@ -12,3 +12,7 @@ mupdf-sys.workspace = true
 rsa = { version = "0.10", features = ["pkcs1v15"] }
 sha1 = "0.11"
 p12-keystore = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+# The registry's list of installed fonts, and reading font files without copying them.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Memory", "Win32_System_Registry"] }

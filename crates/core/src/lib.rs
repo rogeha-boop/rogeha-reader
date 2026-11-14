@@ -6,6 +6,7 @@
 //! * [`ocr`]: recognise text in scans and add it as an invisible layer (run in a helper process).
 //! * [`signature`]: stamp a drawn, typed or photographed signature onto a page.
 //! * [`dsig`]: digital (certificate) signatures: sign with a PKCS#12 identity, verify.
+//! * [`fonts`]: fonts installed on the computer, for documents that do not carry their own.
 //! * [`forms`]: fill out PDF forms (text, checkboxes, radio buttons, dropdowns).
 //! * [`worker`]: a background thread that owns the engine and talks to the GUI over channels.
 
@@ -13,6 +14,7 @@ pub mod annotations;
 pub mod compress;
 pub mod dsig;
 pub mod engine;
+pub mod fonts;
 pub mod forms;
 pub mod ocr;
 pub mod signature;

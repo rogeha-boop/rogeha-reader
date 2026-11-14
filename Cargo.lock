@@ -3118,6 +3118,7 @@ dependencies = [
  "p12-keystore",
  "rsa",
  "sha1",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

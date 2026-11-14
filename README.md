@@ -15,8 +15,9 @@ AI assistant work; offline translation is planned (see [PLAN.md](PLAN.md)).
 - **Document tabs**, **recent files** that reopen at the page, zoom and layout you left, and
   **password-protected PDFs** (the password is asked for and never stored)
 - **Outline** (table of contents) panel, **clickable links** with Back / Forward, **dark pages** for
-  night reading, and **printing** through the system print dialog (comments, form entries and
-  signatures are printed as shown)
+  night reading, **fonts installed in Windows** for documents that do not carry their own
+  (including Chinese, Japanese, Korean, Arabic, Indic scripts and emoji), and **printing**
+  through the system print dialog (comments, form entries and signatures are printed as shown)
 - **Undo and redo** (Ctrl+Z, Ctrl+Y) for page changes, comments, signatures and form entries;
   the history starts over when the document is saved
 - **Translate** a selected passage or the current page with the assistant (Tools menu chooses

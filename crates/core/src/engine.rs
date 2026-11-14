@@ -154,6 +154,7 @@ impl Engine {
     /// the error is [`NEEDS_PASSWORD`] or [`WRONG_PASSWORD`].
     pub fn open_with(path: &Path, password: Option<&str>) -> Result<Self> {
         let path_str = path.to_str().ok_or("File path is not valid Unicode")?;
+        crate::fonts::install();
         let mut doc = Document::open(path_str).map_err(err)?;
         let mut used = None;
         if doc.needs_password().map_err(err)? {

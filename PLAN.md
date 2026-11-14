@@ -139,23 +139,28 @@ Planned, in this order:
 ## Known gaps in the first version
 
 - **Memory is much better but still above SumatraPDF.** Measured on a high-DPI screen
-  (2200 x 1640 px window): 47 MB for an empty window, 75-140 MB with a document. What is left
-  is mostly pixels: the window frame is held twice (2 x 14 MB) and three rendered pages are kept
-  (about 15 MB each at this resolution). On a normal 1080p screen these are about a quarter
-  the size. Next steps: keep pages as 3 bytes per pixel or only the visible tiles, drop the
-  rasteriser's second frame copy, and render only the visible part at high zoom.
-- **System fonts are off.** mupdf-rs's `system-fonts` feature (font-kit) hangs on Windows when
-  opening EPUBs, so it is disabled. PDFs that don't embed their fonts, and EPUB text in scripts
-  outside the built-in fonts (CJK, Arabic, emoji...), fall back to the base-14 fonts or show
-  missing glyphs. Fix: a small own font loader that reads `C:\Windows\Fonts` (mupdf-rs has a
-  `FontLoader` hook), or bundle Noto/Droid fallback fonts.
+  (2200 x 1640 px window), steady after 10 s: 37 MB for an empty window, 73 MB with a one-page
+  document, 94-98 MB with a normal PDF. Where the 98 MB go: 29 MB are the window's frame, held
+  twice (2 x 14 MB); 46 MB are three rendered pages (the one on screen, part of the next, and
+  one read ahead, about 15 MB each at 4 bytes per pixel); about 15 MB are MuPDF's document,
+  fonts and glyphs; 8 MB is the program itself. On a normal 1080p screen frame and pages are
+  about a quarter the size (roughly 45 MB in all). Next steps, biggest first: keep pages that
+  are not on screen packed (text pages shrink 10-20 times) or as 3 bytes per pixel, drop the
+  second frame copy, and render only the visible part at high zoom.
+- **Installed fonts are used on Windows only.** `crates/core/src/fonts.rs` answers MuPDF's
+  requests from the registry's font list and the fonts Windows ships for each script (font
+  files are mapped, not read, so a 20 MB Chinese font costs almost nothing). mupdf-rs's own
+  `system-fonts` feature (font-kit) hangs on Windows when opening EPUBs and stays off, so on
+  macOS and Linux documents that do not carry their fonts still fall back to the base-14
+  fonts. Emoji are drawn in black and white.
 - Deleting a comment removes it from the document, but with a normal (incremental) save its
   text can still be recovered from the file's older bytes, as in other PDF editors.
 - Tabs are light: only the tab in front holds its document, so switching tabs reopens the file
   (at the remembered page and zoom) and asks about unsaved changes first. Search results and
   the assistant's conversation do not survive a tab switch.
-- Printing sends each page as a picture (up to 300 dpi), which is faithful but makes large
-  print jobs; it is Windows-only so far. Compress, OCR and digital signing do not yet work on
+- Printing sends each page as a picture (up to 300 dpi) and is Windows-only so far. Only the
+  inked parts are sent, grey where there is no colour, which makes a job 2-6 times smaller
+  than whole pictures; a page that is one big colour photo is still large. Compress, OCR and digital signing do not yet work on
   password-protected files, and dark pages also darken photos.
 - Search runs over the whole document on the document thread, so rendering waits on very
   large files; above about 12 megapixels per page (very high zoom) the page is upscaled
