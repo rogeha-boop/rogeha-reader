@@ -18,7 +18,7 @@ pub mod ocr;
 pub mod signature;
 pub mod worker;
 
-pub use annotations::{AnnotInfo, AnnotKind, MarkupKind, TextSelection};
+pub use annotations::{AnnotInfo, AnnotKind, COMMENT_PALETTE, MarkupKind, TextSelection, author_color};
 pub use dsig::{Identity, SignOptions, SignatureInfo, SignatureStatus, format_time};
 pub use compress::{CompressStats, Preset, compress_pdf};
 pub use signature::{INK_BLACK, INK_BLUE, SignatureArt, load_signature_image, render_signature};

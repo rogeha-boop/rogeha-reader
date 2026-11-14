@@ -48,8 +48,8 @@ pub enum Request {
     SelectText { page: usize, a: (f32, f32), b: (f32, f32), seq: u64 },
     /// Send the list of comments now, and again after every change.
     ListAnnotations,
-    AddMarkup { page: usize, kind: MarkupKind, quads: Vec<HitQuad>, author: String, contents: String },
-    AddNote { page: usize, at: (f32, f32), contents: String, author: String },
+    AddMarkup { page: usize, kind: MarkupKind, quads: Vec<HitQuad>, author: String, contents: String, color: [u8; 3] },
+    AddNote { page: usize, at: (f32, f32), contents: String, author: String, color: [u8; 3] },
     EditAnnotation { page: usize, xref: i32, contents: String },
     DeleteAnnotation { page: usize, xref: i32 },
     /// Stamp a visual signature; `rect` is (x0, y0, x1, y1) in displayed page points.
@@ -57,7 +57,7 @@ pub enum Request {
     /// Text of a range of pages (0-based, inclusive), for the assistant.
     PagesText { from: usize, to: usize },
     /// Highlight every occurrence of a text on a page.
-    HighlightText { page: usize, text: String, author: String, comment: String },
+    HighlightText { page: usize, text: String, author: String, comment: String, color: [u8; 3] },
     /// Send the document's form fields now, and again after every change.
     ListFields,
     /// Type into a text field or choose a dropdown / list option.
@@ -325,16 +325,16 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
             st.wants_annotations = true;
             send_annotations(st, emit)
         }
-        Request::AddMarkup { page, kind, quads, author, contents } => {
+        Request::AddMarkup { page, kind, quads, author, contents, color } => {
             let Some(engine) = st.engine.as_mut() else { return true };
-            match engine.add_markup(page, kind, &quads, &author, &contents) {
+            match engine.add_markup(page, kind, &quads, &author, &contents, color) {
                 Ok(xref) => changed(st, emit) && emit(Event::AnnotationAdded { page, xref }),
                 Err(e) => emit(Event::Error(e)),
             }
         }
-        Request::AddNote { page, at, contents, author } => {
+        Request::AddNote { page, at, contents, author, color } => {
             let Some(engine) = st.engine.as_mut() else { return true };
-            match engine.add_note(page, at, &contents, &author) {
+            match engine.add_note(page, at, &contents, &author, color) {
                 Ok(xref) => changed(st, emit) && emit(Event::AnnotationAdded { page, xref }),
                 Err(e) => emit(Event::Error(e)),
             }
@@ -358,8 +358,8 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
             });
             emit(Event::PagesText(result))
         }
-        Request::HighlightText { page, text, author, comment } => {
-            edit!(|e: &mut Engine| e.highlight_text(page, &text, &author, &comment))
+        Request::HighlightText { page, text, author, comment, color } => {
+            edit!(|e: &mut Engine| e.highlight_text(page, &text, &author, &comment, color))
         }
         Request::ListFields => {
             st.wants_fields = true;

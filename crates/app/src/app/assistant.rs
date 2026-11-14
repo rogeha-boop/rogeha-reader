@@ -176,6 +176,7 @@ impl ReaderApp {
             _ => Err(format!("That page does not exist; the document has {count} pages.")),
         };
         let author = self.comments.author.clone();
+        let color = self.my_comment_color();
         let not_pdf = "This document is not a PDF, so it cannot be changed.";
         let activity = |app: &mut Self, text: String| app.assistant.log.push(Line::Activity(text));
 
@@ -264,7 +265,7 @@ impl ReaderApp {
                 Ok(page) => {
                     let contents = input["text"].as_str().unwrap_or_default().to_owned();
                     activity(self, format!("Adding a note on page {}", page + 1));
-                    self.worker.send(Request::AddNote { page, at: (36.0, 36.0), contents, author });
+                    self.worker.send(Request::AddNote { page, at: (36.0, 36.0), contents, author, color });
                     self.assistant.pending = Some((id, Pending::Edit(format!("Added a note on page {}.", page + 1))));
                 }
             },
@@ -275,7 +276,7 @@ impl ReaderApp {
                     let comment = input["comment"].as_str().unwrap_or_default().to_owned();
                     activity(self, format!("Highlighting \"{text}\" on page {}", page + 1));
                     let done = format!("Highlighted \"{text}\" on page {}.", page + 1);
-                    self.worker.send(Request::HighlightText { page, text, author, comment });
+                    self.worker.send(Request::HighlightText { page, text, author, comment, color });
                     self.assistant.pending = Some((id, Pending::Edit(done)));
                 }
             },

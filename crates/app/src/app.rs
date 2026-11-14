@@ -1269,8 +1269,11 @@ impl ReaderApp {
                         at: (120.0, 160.0),
                         contents: arg.to_owned(),
                         author: self.comments.author.clone(),
+                        color: self.my_comment_color(),
                     }),
                     "comments" => self.comments.panel_open = true,
+                    // author=<name>: comment as this person
+                    "author" => self.comments.author = arg.to_owned(),
                     "about" => self.about.open = true,
                     "sign" => self.sign.open = true,
                     // signat=<x>,<y>,<draw | a name>: start placing at that point on the current page

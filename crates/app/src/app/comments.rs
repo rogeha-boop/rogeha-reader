@@ -20,6 +20,8 @@ pub(super) struct Editor {
     xref: Option<i32>,
     /// Where a new note goes, in page points.
     at: (f32, f32),
+    /// For a new comment on selected text: the text's boxes.
+    quads: Option<Vec<HitQuad>>,
     title: String,
     text: String,
     original: String,
@@ -185,6 +187,7 @@ impl ReaderApp {
                             page,
                             xref: None,
                             at: p,
+                            quads: None,
                             title: format!("New note on page {}", page + 1),
                             text: String::new(),
                             original: String::new(),
@@ -230,6 +233,7 @@ impl ReaderApp {
             page: annot.page,
             xref: Some(annot.xref),
             at: (annot.rect.0, annot.rect.1),
+            quads: None,
             title: format!("{}{who}, page {}", annot.kind.label(), annot.page + 1),
             text: annot.contents.clone(),
             original: annot.contents.clone(),
@@ -286,6 +290,7 @@ impl ReaderApp {
         let can_mark = self.can_edit();
         let mut action = None;
         let mut copy = false;
+        let mut comment = false;
         egui::Area::new(Id::unique("selection-bar"))
             .order(Order::Foreground)
             .pivot(Align2::RIGHT_TOP)
@@ -294,6 +299,14 @@ impl ReaderApp {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         let hint = "Works on PDF files";
+                        if ui
+                            .add_enabled(can_mark, egui::Button::new("Comment"))
+                            .on_hover_text("Write a comment attached to this text")
+                            .on_disabled_hover_text(hint)
+                            .clicked()
+                        {
+                            comment = true;
+                        }
                         if ui.add_enabled(can_mark, egui::Button::new("Highlight")).on_disabled_hover_text(hint).clicked() {
                             action = Some(MarkupKind::Highlight);
                         }
@@ -312,6 +325,24 @@ impl ReaderApp {
         if copy {
             self.copy_selection(ui.ctx());
         }
+        if comment {
+            // The selection stays visible while the comment is written; saving turns it
+            // into a highlight that carries the comment.
+            if let Some(sel) = &self.comments.selection {
+                self.comments.selected = None;
+                self.comments.editor = Some(Editor {
+                    page: sel.page,
+                    xref: None,
+                    at: (0.0, 0.0),
+                    quads: Some(sel.quads.clone()),
+                    title: format!("Comment on the selected text, page {}", sel.page + 1),
+                    text: String::new(),
+                    original: String::new(),
+                    pos: pos + Vec2::new(0.0, 44.0),
+                    focus: true,
+                });
+            }
+        }
         if let Some(kind) = action {
             self.mark_selection(kind);
         }
@@ -326,6 +357,11 @@ impl ReaderApp {
         }
     }
 
+    /// The colour of this person's comments in this document (see `rogeha_core::author_color`).
+    pub(super) fn my_comment_color(&self) -> [u8; 3] {
+        rogeha_core::author_color(&self.comments.author, &self.comments.list)
+    }
+
     /// Turn the current text selection into a highlight, underline or strike-out.
     pub(super) fn mark_selection(&mut self, kind: MarkupKind) {
         if !self.can_edit() {
@@ -338,6 +374,7 @@ impl ReaderApp {
                 quads: sel.quads,
                 author: self.comments.author.clone(),
                 contents: String::new(),
+                color: self.my_comment_color(),
             });
         }
     }
@@ -390,12 +427,24 @@ impl ReaderApp {
                     xref,
                     contents: editor.text,
                 }),
-                None => self.worker.send(Request::AddNote {
-                    page: editor.page,
-                    at: editor.at,
-                    contents: editor.text,
-                    author: self.comments.author.clone(),
-                }),
+                None => {
+                    let (author, color) = (self.comments.author.clone(), self.my_comment_color());
+                    match editor.quads {
+                        // A comment on selected text: a highlight that carries the comment.
+                        Some(quads) => {
+                            self.comments.selection = None;
+                            self.worker.send(Request::AddMarkup {
+                                page: editor.page,
+                                kind: MarkupKind::Highlight,
+                                quads,
+                                author,
+                                contents: editor.text,
+                                color,
+                            });
+                        }
+                        None => self.worker.send(Request::AddNote { page: editor.page, at: editor.at, contents: editor.text, author, color }),
+                    }
+                }
             }
         } else if delete {
             let editor = self.comments.editor.take().unwrap();
@@ -416,6 +465,10 @@ impl ReaderApp {
             ui.label("Your name:");
             ui.add(egui::TextEdit::singleline(&mut self.comments.author).desired_width(140.0))
                 .on_hover_text("Saved as the author of the comments you add");
+            let c = self.my_comment_color();
+            let (chip, _) = ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
+            ui.painter().rect_filled(chip, 3, egui::Color32::from_rgb(c[0], c[1], c[2]));
+            ui.label(egui::RichText::new("your colour").small().weak());
         });
         if self.doc.as_ref().is_some_and(|d| !d.is_pdf) {
             ui.label(egui::RichText::new("Comments can be added to PDF files.").weak());
@@ -466,7 +519,13 @@ impl ReaderApp {
                 let resp = frame
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.label(egui::RichText::new(head).small().strong());
+                        ui.horizontal(|ui| {
+                            // Each person's comments carry their colour.
+                            let (chip, _) = ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
+                            let c = annot.color.unwrap_or([150, 150, 150]);
+                            ui.painter().rect_filled(chip, 2, egui::Color32::from_rgb(c[0], c[1], c[2]));
+                            ui.label(egui::RichText::new(head).small().strong());
+                        });
                         ui.label(body);
                     })
                     .response

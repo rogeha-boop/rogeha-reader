@@ -68,6 +68,8 @@ pub struct AnnotInfo {
     pub quads: Vec<HitQuad>,
     pub author: String,
     pub contents: String,
+    /// The annotation's own colour (RGB), if it has one.
+    pub color: Option<[u8; 3]>,
 }
 
 /// Text selected between two points on a page.
@@ -75,6 +77,45 @@ pub struct AnnotInfo {
 pub struct TextSelection {
     pub quads: Vec<HitQuad>,
     pub text: String,
+}
+
+fn rgb(c: [u8; 3]) -> AnnotationColor {
+    AnnotationColor::Rgb { red: c[0] as f32 / 255.0, green: c[1] as f32 / 255.0, blue: c[2] as f32 / 255.0 }
+}
+
+/// Colours for people's comments: distinct from one another, light enough to read text
+/// through as a highlight and strong enough to see as an underline or a note.
+pub const COMMENT_PALETTE: [[u8; 3]; 8] = [
+    [0xff, 0xd4, 0x00], // yellow
+    [0x5b, 0xd7, 0x5b], // green
+    [0x4d, 0xa3, 0xff], // blue
+    [0xff, 0x6f, 0xae], // pink
+    [0xff, 0x9a, 0x3c], // orange
+    [0xb5, 0x8c, 0xff], // purple
+    [0x2e, 0xc4, 0xb6], // teal
+    [0xff, 0x5c, 0x5c], // red
+];
+
+/// The colour for a person's new comments in a document, given the comments already there.
+///
+/// Someone who has commented before keeps the colour they used. A new person gets a colour
+/// of the palette that nobody else in the document is using (their "own" palette colour if
+/// it is free, otherwise the next free one), so different people can be told apart. Comments
+/// made in other software count too, whatever colour that software gave them.
+pub fn author_color(author: &str, existing: &[AnnotInfo]) -> [u8; 3] {
+    let same = |a: &str| a.trim().eq_ignore_ascii_case(author.trim());
+    // Keep the colour this person used most recently.
+    if let Some(color) = existing.iter().rev().filter(|a| same(&a.author)).find_map(|a| a.color) {
+        return color;
+    }
+    let taken: Vec<[u8; 3]> = existing.iter().filter(|a| !same(&a.author)).filter_map(|a| a.color).collect();
+    let close = |a: [u8; 3], b: [u8; 3]| (0..3).map(|i| (a[i] as i32 - b[i] as i32).pow(2)).sum::<i32>() < 50 * 50;
+    // A stable starting point per name (FNV-1a), so the same person tends to get the same colour everywhere.
+    let start = author.trim().to_lowercase().bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3)) as usize;
+    (0..COMMENT_PALETTE.len())
+        .map(|i| COMMENT_PALETTE[(start + i) % COMMENT_PALETTE.len()])
+        .find(|c| !taken.iter().any(|t| close(*c, *t)))
+        .unwrap_or(COMMENT_PALETTE[start % COMMENT_PALETTE.len()])
 }
 
 fn kind_of(t: PdfAnnotationType) -> Option<AnnotKind> {
@@ -123,6 +164,16 @@ fn describe(page: usize, annot: &PdfAnnotation) -> Option<AnnotInfo> {
         quads,
         author: annot.author().ok().flatten().unwrap_or_default().to_owned(),
         contents: annot.contents().ok().flatten().unwrap_or_default().to_owned(),
+        color: annot.color().ok().flatten().map(|c| {
+            let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            match c {
+                AnnotationColor::Gray(g) => [byte(g); 3],
+                AnnotationColor::Rgb { red, green, blue } => [byte(red), byte(green), byte(blue)],
+                AnnotationColor::Cmyk { cyan, magenta, yellow, key } => {
+                    [byte((1.0 - cyan) * (1.0 - key)), byte((1.0 - magenta) * (1.0 - key)), byte((1.0 - yellow) * (1.0 - key))]
+                }
+            }
+        }),
     })
 }
 
@@ -279,21 +330,22 @@ impl Engine {
         quads: &[HitQuad],
         author: &str,
         contents: &str,
+        color: [u8; 3],
     ) -> Result<i32> {
         if quads.is_empty() {
             return Err("Select some text first".into());
         }
         let stamp = self.stamp(true)?;
         let mut p = self.pdf_page(page)?;
-        let (subtype, color) = match kind {
-            MarkupKind::Highlight => (PdfAnnotationType::Highlight, (1.0, 0.92, 0.23)),
-            MarkupKind::Underline => (PdfAnnotationType::Underline, (0.13, 0.59, 0.25)),
-            MarkupKind::StrikeOut => (PdfAnnotationType::StrikeOut, (0.90, 0.16, 0.16)),
+        let subtype = match kind {
+            MarkupKind::Highlight => PdfAnnotationType::Highlight,
+            MarkupKind::Underline => PdfAnnotationType::Underline,
+            MarkupKind::StrikeOut => PdfAnnotationType::StrikeOut,
         };
         let mut annot = p.create_annotation(subtype).map_err(err)?;
         let result = (|| {
             annot.set_quad_points(quads.iter().map(to_quad).collect::<Vec<_>>())?;
-            annot.set_color(AnnotationColor::Rgb { red: color.0, green: color.1, blue: color.2 })?;
+            annot.set_color(rgb(color))?;
             annot.set_author(author)?;
             if !contents.is_empty() {
                 annot.set_contents(contents)?;
@@ -306,7 +358,7 @@ impl Engine {
     }
 
     /// Add a sticky note at a point on the page.
-    pub fn add_note(&mut self, page: usize, at: (f32, f32), contents: &str, author: &str) -> Result<i32> {
+    pub fn add_note(&mut self, page: usize, at: (f32, f32), contents: &str, author: &str, color: [u8; 3]) -> Result<i32> {
         let stamp = self.stamp(true)?;
         let mut p = self.pdf_page(page)?;
         let rect = Rect::new(at.0, at.1, at.0 + 20.0, at.1 + 20.0);
@@ -314,7 +366,7 @@ impl Engine {
         let result = (|| {
             annot.set_rect(rect)?;
             annot.set_icon_name("Comment")?;
-            annot.set_color(AnnotationColor::Rgb { red: 1.0, green: 0.82, blue: 0.0 })?;
+            annot.set_color(rgb(color))?;
             annot.set_author(author)?;
             annot.set_contents(contents)?;
             stamp.apply(&annot)?;
@@ -348,13 +400,13 @@ impl Engine {
 
     /// Highlight every occurrence of `text` on a page (optionally with a comment on the
     /// first one). Returns how many were highlighted.
-    pub fn highlight_text(&mut self, page: usize, text: &str, author: &str, comment: &str) -> Result<usize> {
+    pub fn highlight_text(&mut self, page: usize, text: &str, author: &str, comment: &str, color: [u8; 3]) -> Result<usize> {
         let hits = self.search_page(page, text)?;
         if hits.is_empty() {
             return Err(format!("\"{text}\" was not found on page {}", page + 1));
         }
         // One annotation per occurrence would clutter the comment list; one covers them all.
-        self.add_markup(page, MarkupKind::Highlight, &hits, author, comment)?;
+        self.add_markup(page, MarkupKind::Highlight, &hits, author, comment, color)?;
         Ok(hits.len())
     }
 

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use mupdf::Size;
 use mupdf::pdf::PdfDocument;
 use rogeha_core::{FieldKind, Identity, SignOptions, SignatureStatus};
+use rogeha_core::{COMMENT_PALETTE, author_color};
 use rogeha_core::{AnnotKind, Engine, INK_BLUE, MarkupKind, Preset, SignatureArt, compress_pdf, load_signature_image, ocr_pdf};
 
 const A: (f32, f32) = (595.0, 842.0);
@@ -198,13 +199,13 @@ fn comments_are_saved_as_standard_annotations() {
     assert_eq!(word.text, "Hello");
 
     let highlight = engine
-        .add_markup(0, MarkupKind::Highlight, &sel.quads, "Ada", "Check this sentence")
+        .add_markup(0, MarkupKind::Highlight, &sel.quads, "Ada", "Check this sentence", COMMENT_PALETTE[0])
         .unwrap();
-    engine.add_markup(0, MarkupKind::Underline, &word.quads, "Ada", "").unwrap();
-    let strike = engine.add_markup(0, MarkupKind::StrikeOut, &word.quads, "Ada", "").unwrap();
-    let note = engine.add_note(0, (300.0, 300.0), "A sticky note", "Ada").unwrap();
+    engine.add_markup(0, MarkupKind::Underline, &word.quads, "Ada", "", COMMENT_PALETTE[0]).unwrap();
+    let strike = engine.add_markup(0, MarkupKind::StrikeOut, &word.quads, "Ada", "", COMMENT_PALETTE[0]).unwrap();
+    let note = engine.add_note(0, (300.0, 300.0), "A sticky note", "Ada", COMMENT_PALETTE[0]).unwrap();
     assert!(engine.is_dirty());
-    assert!(engine.add_markup(0, MarkupKind::Highlight, &[], "Ada", "").is_err());
+    assert!(engine.add_markup(0, MarkupKind::Highlight, &[], "Ada", "", COMMENT_PALETTE[0]).is_err());
 
     engine.set_annotation_contents(0, note, "Edited note \u{e9}\u{4e2d}").unwrap();
     engine.delete_annotation(0, strike).unwrap();
@@ -241,7 +242,7 @@ fn comments_are_saved_as_standard_annotations() {
 fn comments_need_a_pdf() {
     let path = fixture("comments-bad");
     let mut engine = Engine::open(&path).unwrap();
-    assert!(engine.add_note(9, (10.0, 10.0), "x", "me").is_err());
+    assert!(engine.add_note(9, (10.0, 10.0), "x", "me", COMMENT_PALETTE[0]).is_err());
     assert!(engine.set_annotation_contents(0, 12345, "x").is_err());
     assert!(!engine.is_dirty());
     drop(engine);
@@ -559,7 +560,7 @@ fn digital_signatures_sign_and_verify() {
     // Adding a comment afterwards keeps the signature intact, but it no longer covers the
     // whole file; signing again adds a second signature and keeps the first one valid.
     let mut engine = Engine::open(&path).unwrap();
-    engine.add_note(0, (300.0, 300.0), "Looks good", "Bob").unwrap();
+    engine.add_note(0, (300.0, 300.0), "Looks good", "Bob", COMMENT_PALETTE[1]).unwrap();
     engine.save(None).unwrap();
     let sigs = engine.signatures();
     assert_eq!(sigs[0].status, SignatureStatus::Intact);
@@ -700,11 +701,46 @@ fn reading_pages_and_highlighting_by_text() {
     assert!(engine.pages_text(0, 5, 60_000).is_err());
     assert!(engine.pages_text(1, 0, 60_000).is_err());
 
-    assert_eq!(engine.highlight_text(0, "annotated", "Assistant", "Key term").unwrap(), 1);
-    assert!(engine.highlight_text(0, "missing words", "Assistant", "").is_err());
+    assert_eq!(engine.highlight_text(0, "annotated", "Assistant", "Key term", COMMENT_PALETTE[2]).unwrap(), 1);
+    assert!(engine.highlight_text(0, "missing words", "Assistant", "", COMMENT_PALETTE[2]).is_err());
     let list = engine.all_annotations();
     assert_eq!(list.len(), 1);
     assert_eq!((list[0].kind, list[0].contents.as_str(), list[0].author.as_str()), (AnnotKind::Highlight, "Key term", "Assistant"));
     drop(engine);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn each_person_gets_their_own_comment_colour() {
+    let path = text_fixture("colours");
+    let mut engine = Engine::open(&path).unwrap();
+    let word = engine.select_text(0, (70.0, 135.0), (125.0, 135.0)).unwrap();
+
+    // In an empty document a person gets a palette colour, always the same one.
+    let ada = author_color("Ada", &[]);
+    assert!(COMMENT_PALETTE.contains(&ada));
+    assert_eq!(author_color("  ada ", &[]), ada, "names are compared without case or spaces");
+
+    engine.add_markup(0, MarkupKind::Highlight, &word.quads, "Ada", "first", ada).unwrap();
+    let list = engine.all_annotations();
+    assert_eq!(list[0].color, Some(ada), "the colour is stored in the annotation");
+
+    // Everyone else gets a colour different from Ada's, and from each other's.
+    let mut seen = vec![ada];
+    for name in ["Bob", "Chidi", "Dana", "Eve", "Farid", "Grace", "Hui"] {
+        let color = author_color(name, &engine.all_annotations());
+        assert!(!seen.contains(&color), "{name} must not share a colour");
+        seen.push(color);
+        engine.add_note(0, (300.0, 300.0), "note", name, color).unwrap();
+    }
+    // Ada keeps hers, also after saving and reopening.
+    engine.save(None).unwrap();
+    let reopened = Engine::open(&path).unwrap();
+    let list = reopened.all_annotations();
+    assert_eq!(author_color("Ada", &list), ada);
+    assert_eq!(list.iter().find(|a| a.author == "Bob").unwrap().color, Some(seen[1]));
+    // A colour another program used for someone is respected as that person's colour.
+    assert_eq!(author_color("Bob", &list), seen[1]);
+    drop((engine, reopened));
     std::fs::remove_file(path).unwrap();
 }
