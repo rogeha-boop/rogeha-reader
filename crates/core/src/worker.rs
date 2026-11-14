@@ -19,6 +19,8 @@ pub struct RenderKey {
     pub scale_milli: u32,
     /// Bumped every time the document changes (open, rotate, delete, ...).
     pub generation: u64,
+    /// A small picture for the Pages panel rather than the page view.
+    pub thumb: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -39,6 +41,9 @@ pub enum Request {
     Rotate { pages: Vec<usize>, delta: i32 },
     Delete { pages: Vec<usize> },
     Move { from: usize, to: usize },
+    /// Take these pages out and put them back, in order, before page `before`
+    /// (an index into the current order; the page count means "at the end").
+    Reorder { pages: Vec<usize>, before: usize },
     /// Merge other PDFs into the open one, in order. `before = None` appends.
     InsertPdfs { paths: Vec<PathBuf>, before: Option<usize> },
     Save { target: Option<PathBuf> },
@@ -275,6 +280,7 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
         Request::Rotate { pages, delta } => edit!(|e: &mut Engine| e.rotate_pages(&pages, delta)),
         Request::Delete { pages } => edit!(|e: &mut Engine| e.delete_pages(&pages)),
         Request::Move { from, to } => edit!(|e: &mut Engine| e.move_page(from, to)),
+        Request::Reorder { pages, before } => edit!(|e: &mut Engine| e.reorder_pages(&pages, before)),
         Request::InsertPdfs { paths, before } => edit!(|e: &mut Engine| {
             let mut at = before;
             for path in &paths {

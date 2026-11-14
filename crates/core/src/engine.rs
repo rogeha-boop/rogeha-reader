@@ -305,6 +305,41 @@ impl Engine {
         self.refresh_sizes()
     }
 
+    /// Move several pages at once: they are taken out and put back together, keeping their
+    /// order, in front of the page that is at index `before` now (`before == page_count()`
+    /// puts them at the end). Dragging a selection in the Pages panel does this.
+    pub fn reorder_pages(&mut self, pages: &[usize], before: usize) -> Result<()> {
+        let count = self.sizes.len();
+        self.check_pages(pages)?;
+        if before > count {
+            return Err(format!("Page {} does not exist", before + 1));
+        }
+        let mut moving: Vec<usize> = pages.to_vec();
+        moving.sort_unstable();
+        moving.dedup();
+        // The wanted order, as indices into the current order.
+        let staying = |p: &usize| !moving.contains(p);
+        let mut order: Vec<usize> = (0..before).filter(staying).collect();
+        order.extend(&moving);
+        order.extend((before..count).filter(staying));
+        if order.iter().copied().eq(0..count) {
+            return Ok(()); // nothing actually moves
+        }
+        // Get there one page at a time, tracking where each original page currently is.
+        let doc = self.pdf_mut()?;
+        let mut current: Vec<usize> = (0..count).collect();
+        for (target, wanted) in order.iter().enumerate() {
+            let at = current.iter().position(|p| p == wanted).expect("every page is in the list");
+            if at != target {
+                doc.move_page(at, target).map_err(err)?;
+                let page = current.remove(at);
+                current.insert(target, page);
+            }
+        }
+        self.dirty = true;
+        self.refresh_sizes()
+    }
+
     /// Merge: copy every page of another PDF into this one. `before = None` appends at the
     /// end, `Some(i)` inserts before page `i`. Returns the number of pages added.
     pub fn insert_pdf(&mut self, other: &Path, before: Option<usize>) -> Result<usize> {

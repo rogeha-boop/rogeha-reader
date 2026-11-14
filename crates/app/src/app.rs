@@ -21,6 +21,7 @@ mod compress;
 mod dsign;
 mod forms;
 mod ocr;
+mod pages_panel;
 mod sign;
 
 /// PDF points (1/72") to screen pixels at 100% zoom (96 dpi).
@@ -122,6 +123,7 @@ pub struct ReaderApp {
     sign: sign::SignUi,
     digital: dsign::DigitalUi,
     forms: forms::FormsUi,
+    pages: pages_panel::PagesUi,
     assistant: assistant::AssistantUi,
     message: Option<(String, Instant, bool)>,
     after_save: AfterSave,
@@ -192,6 +194,7 @@ impl ReaderApp {
             sign: sign::SignUi::default(),
             digital: dsign::DigitalUi::default(),
             forms: forms::FormsUi::default(),
+            pages: pages_panel::PagesUi::default(),
             assistant: assistant::AssistantUi::default(),
             message: None,
             after_save: AfterSave::Nothing,
@@ -346,64 +349,6 @@ impl ReaderApp {
         }
     }
 
-    fn delete_current(&mut self) {
-        if !self.can_edit() || self.page_count() < 2 {
-            return;
-        }
-        let page = self.current_page;
-        let ok = rfd::MessageDialog::new()
-            .set_title("Delete page")
-            .set_description(format!(
-                "Delete page {} from this document?\nThe file changes only when you save.",
-                page + 1
-            ))
-            .set_buttons(rfd::MessageButtons::OkCancel)
-            .show();
-        if matches!(ok, rfd::MessageDialogResult::Ok) {
-            self.pending_page = Some(page.min(self.page_count().saturating_sub(2)));
-            self.worker.send(Request::Delete { pages: vec![page] });
-        }
-    }
-
-    fn move_current(&mut self, later: bool) {
-        if !self.can_edit() {
-            return;
-        }
-        let from = self.current_page;
-        let to = if later {
-            if from + 1 >= self.page_count() {
-                return;
-            }
-            from + 1
-        } else {
-            if from == 0 {
-                return;
-            }
-            from - 1
-        };
-        self.pending_page = Some(to);
-        self.worker.send(Request::Move { from, to });
-    }
-
-    /// Merge: pick one or more PDFs and add their pages at the end, or after the current page.
-    fn add_pdfs(&mut self, after_current: bool) {
-        if !self.can_edit() {
-            return;
-        }
-        let picked = rfd::FileDialog::new()
-            .set_title("Choose PDFs to add (they are added in the order shown)")
-            .add_filter("PDF", &["pdf"])
-            .pick_files();
-        let Some(mut paths) = picked else { return };
-        if paths.is_empty() {
-            return;
-        }
-        paths.sort();
-        let before = after_current.then_some(self.current_page + 1);
-        self.pending_page = Some(before.unwrap_or(self.page_count()));
-        self.worker.send(Request::InsertPdfs { paths, before });
-    }
-
     fn run_search(&mut self) {
         let query = self.search.query.trim().to_owned();
         if query.is_empty() {
@@ -456,6 +401,9 @@ impl ReaderApp {
                         && self.doc.as_ref().is_some_and(|d| d.page_sizes == info.page_sizes);
                     if !same_layout {
                         self.textures.clear();
+                        // Thumbnails are redrawn; a selection survives only a pure reorder or rotation.
+                        let same_count = self.doc.as_ref().is_some_and(|d| same_file && d.page_sizes.len() == info.page_sizes.len());
+                        self.pages.reset(same_count);
                     }
                     if !same_file {
                         self.comments.reset_for_new_document();
@@ -488,6 +436,10 @@ impl ReaderApp {
                 Event::Rendered { key, image } => {
                     let current = self.doc.as_ref().is_some_and(|d| d.generation == key.generation);
                     if !current {
+                        continue;
+                    }
+                    if key.thumb {
+                        self.thumbnail_arrived(ctx, key, image);
                         continue;
                     }
                     self.textures.insert(key.page, PageTex { key, image: Arc::new(image) });
@@ -604,7 +556,7 @@ impl ReaderApp {
         if total <= TEXTURE_BUDGET {
             return;
         }
-        let wanted: HashSet<usize> = self.last_want.iter().map(|k| k.page).collect();
+        let wanted: HashSet<usize> = self.last_want.iter().filter(|k| !k.thumb).map(|k| k.page).collect();
         let mut pages: Vec<usize> = self.textures.keys().copied().collect();
         let here = self.current_page;
         pages.sort_by_key(|p| std::cmp::Reverse(p.abs_diff(here)));
@@ -744,7 +696,6 @@ impl ReaderApp {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let has_doc = self.doc.is_some();
         let can_edit = self.can_edit();
-        let n = self.page_count();
         let edit_hint = if has_doc && !can_edit {
             "Page editing works on PDF files"
         } else {
@@ -809,56 +760,16 @@ impl ReaderApp {
             {
                 self.rotate(vec![page], 90);
             }
+            if icons::icon_button(ui, Icon::Pages, self.pages.open, has_doc)
+                .on_hover_text("Pages: thumbnails, reorder, rotate, delete, add PDFs")
+                .clicked()
             {
-                let pages_button = icons::icon_button(ui, Icon::Pages, false, can_edit)
-                    .on_hover_text("Pages: move, merge, delete, OCR, compress")
-                    .on_disabled_hover_text(edit_hint);
-                egui::Popup::menu(&pages_button).show(|ui| {
-                    if ui.button("Rotate all pages left").clicked() {
-                        self.rotate((0..n).collect(), -90);
-                        ui.close();
-                    }
-                    if ui.button("Rotate all pages right").clicked() {
-                        self.rotate((0..n).collect(), 90);
-                        ui.close();
-                    }
-                    if ui.button("Turn this page upside down").clicked() {
-                        self.rotate(vec![page], 180);
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui.add_enabled(page > 0, egui::Button::new("Move page earlier")).clicked() {
-                        self.move_current(false);
-                        ui.close();
-                    }
-                    if ui.add_enabled(page + 1 < n, egui::Button::new("Move page later")).clicked() {
-                        self.move_current(true);
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui.button("Add PDFs at the end…").on_hover_text("Combine: append the pages of other PDF files").clicked() {
-                        ui.close();
-                        self.add_pdfs(false);
-                    }
-                    if ui.button("Insert PDFs after this page…").clicked() {
-                        ui.close();
-                        self.add_pdfs(true);
-                    }
-                    ui.separator();
-                    if ui.button("Recognize text (OCR)…").on_hover_text("Make a scanned PDF searchable").clicked() {
-                        ui.close();
-                        self.ocr.open = true;
-                    }
-                    if ui.button("Compress PDF…").on_hover_text("Make a smaller copy of a scanned PDF").clicked() {
-                        ui.close();
-                        self.compress.open = true;
-                    }
-                    ui.separator();
-                    if ui.add_enabled(n > 1, egui::Button::new("Delete this page")).clicked() {
-                        self.delete_current();
-                        ui.close();
-                    }
-                });
+                self.pages.open = !self.pages.open;
+                // One side panel on the left at a time.
+                if self.pages.open {
+                    self.comments.panel_open = false;
+                    self.pages.reset(true);
+                }
             }
 
             ui.separator();
@@ -881,7 +792,27 @@ impl ReaderApp {
                 .clicked()
             {
                 self.comments.panel_open = !self.comments.panel_open;
+                if self.comments.panel_open {
+                    self.pages.open = false;
+                }
             }
+
+            ui.separator();
+
+            // Whole-document tools live in a menu (marked by the chevron).
+            let tools = icons::menu_button(ui, "Tools", can_edit)
+                .on_hover_text("Tools for the whole document")
+                .on_disabled_hover_text(edit_hint);
+            egui::Popup::menu(&tools).show(|ui| {
+                if ui.button("Recognize text (OCR)…").on_hover_text("Make a scanned PDF searchable").clicked() {
+                    ui.close();
+                    self.ocr.open = true;
+                }
+                if ui.button("Compress PDF…").on_hover_text("Make a smaller copy of a scanned PDF").clicked() {
+                    ui.close();
+                    self.compress.open = true;
+                }
+            });
 
             ui.separator();
 
@@ -1174,6 +1105,7 @@ impl ReaderApp {
                 page,
                 scale_milli: (s * 1000.0).round().max(1.0) as u32,
                 generation,
+                thumb: false,
             };
             let have = self.textures.get(&page);
             if have.is_some_and(|t| t.key == key) || self.failed.contains(&key) {
@@ -1185,6 +1117,8 @@ impl ReaderApp {
             }
             want.push(key);
         }
+        // Thumbnails for the Pages panel come after what the page view needs.
+        want.append(&mut self.pages.want);
         if want != self.last_want {
             self.worker.send(Request::Want(want.clone()));
             self.last_want = want;
@@ -1273,6 +1207,9 @@ impl ReaderApp {
                         color: self.my_comment_color(),
                     }),
                     "comments" => self.comments.panel_open = true,
+                    "pages" => self.pages.open = true,
+                    // reorder=2,5>1: move pages 2 and 5 in front of page 1
+                    "reorder" => self.dev_reorder(arg),
                     // author=<name>: comment as this person
                     "author" => self.comments.author = arg.to_owned(),
                     "about" => self.about.open = true,
@@ -1380,6 +1317,12 @@ impl ReaderApp {
             ui.add_space(3.0);
         });
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
+        self.pages.want.clear();
+        if self.pages.open && self.doc.is_some() {
+            egui::Panel::left("pages")
+                .default_size(190.0)
+                .show(ui, |ui| self.pages_panel(ui));
+        }
         if self.comments.panel_open && self.doc.is_some() {
             egui::Panel::left("comments")
                 .default_size(280.0)

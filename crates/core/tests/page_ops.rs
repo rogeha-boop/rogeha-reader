@@ -744,3 +744,38 @@ fn each_person_gets_their_own_comment_colour() {
     drop((engine, reopened));
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn several_pages_move_together() {
+    // Six pages told apart by width: 100, 110, ... 150.
+    let dir = std::env::temp_dir().join("rogeha-reader-tests");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("reorder-{}.pdf", std::process::id()));
+    let mut doc = PdfDocument::new();
+    for i in 0..6 {
+        doc.new_page(Size::new(100.0 + 10.0 * i as f32, 200.0)).unwrap();
+    }
+    doc.save(path.to_str().unwrap()).unwrap();
+    drop(doc);
+    let order = |e: &Engine| e.page_sizes().iter().map(|s| ((s.0 - 100.0) / 10.0).round() as usize).collect::<Vec<_>>();
+
+    let mut engine = Engine::open(&path).unwrap();
+    // Pages 2 and 5 (indices 1 and 4) to the very front.
+    engine.reorder_pages(&[4, 1], 0).unwrap();
+    assert_eq!(order(&engine), vec![1, 4, 0, 2, 3, 5]);
+    // The first two to the end.
+    engine.reorder_pages(&[0, 1], 6).unwrap();
+    assert_eq!(order(&engine), vec![0, 2, 3, 5, 1, 4]);
+    // Into the middle: indices 0 and 5 in front of index 3.
+    engine.reorder_pages(&[0, 5], 3).unwrap();
+    assert_eq!(order(&engine), vec![2, 3, 0, 4, 5, 1]);
+    // Dropping a selection onto itself changes nothing, and bad requests are refused.
+    engine.save(None).unwrap();
+    engine.reorder_pages(&[2, 3], 3).unwrap();
+    assert!(!engine.is_dirty());
+    assert!(engine.reorder_pages(&[9], 0).is_err());
+    assert!(engine.reorder_pages(&[0], 7).is_err());
+    assert_eq!(order(&Engine::open(&path).unwrap()), vec![2, 3, 0, 4, 5, 1], "the new order was saved");
+    drop(engine);
+    std::fs::remove_file(path).unwrap();
+}

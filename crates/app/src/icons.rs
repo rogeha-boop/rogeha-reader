@@ -65,6 +65,28 @@ pub fn icon_button_with_text(ui: &mut Ui, icon: Icon, text: &str, selected: bool
     response
 }
 
+/// A button that opens a menu: its label followed by the design system's down chevron,
+/// which is what marks a menu. Returns the response to attach the menu to.
+pub fn menu_button(ui: &mut Ui, label: &str, enabled: bool) -> Response {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), font, Color32::PLACEHOLDER);
+    let width = 10.0 + galley.size().x + 4.0 + 14.0 + 6.0;
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, BUTTON.y), sense);
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+        let ink = if enabled { visuals.fg_stroke.color } else { ui.visuals().widgets.noninteractive.fg_stroke.color.gamma_multiply(0.4) };
+        ui.painter().rect(rect, visuals.corner_radius, visuals.weak_bg_fill, visuals.bg_stroke, StrokeKind::Inside);
+        ui.painter().galley(Pos2::new(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0), galley, ink);
+        // `chevron-down.svg`: M6 9 l6 6 l6 -6, here at 14 of its 24 units.
+        let unit = 14.0 / 24.0;
+        let centre = Pos2::new(rect.right() - 6.0 - 7.0, rect.center().y);
+        let at = |x: f32, y: f32| centre + Vec2::new(x - 12.0, y - 12.0) * unit;
+        ui.painter().add(Shape::line(vec![at(6.0, 9.0), at(12.0, 15.0), at(18.0, 9.0)], Stroke::new(1.75 * unit.max(0.8), ink)));
+    }
+    response
+}
+
 fn draw(ui: &Ui, icon: Icon, centre: Pos2, ink: Color32) {
     let unit = ICON / 24.0;
     let stroke = Stroke::new(1.75 * unit, ink);
