@@ -6,7 +6,6 @@ mod app;
 mod icons;
 mod install;
 mod runner;
-mod single;
 mod theme;
 
 use std::path::PathBuf;
@@ -69,18 +68,6 @@ fn main() {
         }
     }
 
-    // A document opened from File Explorer goes to the reader that is already open, as a new
-    // tab (single.rs). Scripted runs keep to themselves.
-    let scripted = bench || dev.script.is_some() || dev.screenshot.is_some();
-    if !scripted {
-        if let Some(path) = &file {
-            if single::hand_over(path) {
-                return;
-            }
-        }
-    }
-    let claim = if scripted { None } else { single::claim() };
-
     let viewport = egui::ViewportBuilder::default()
         .with_title("Rogeha Reader")
         .with_inner_size(size)
@@ -95,12 +82,7 @@ fn main() {
         });
 
     let result = runner::run(viewport, move |ctx| {
-        let mut reader = app::ReaderApp::new(ctx, file, started, bench, dev);
-        if let Some(claim) = claim {
-            let wake = ctx.clone();
-            reader.receive_documents(single::listen(claim, move || wake.request_repaint()));
-        }
-        reader
+        app::ReaderApp::new(ctx, file, started, bench, dev)
     });
     if let Err(message) = result {
         rfd::MessageDialog::new()

@@ -6,7 +6,7 @@ and checks by hand is kept by people: change it when such a check is done or a k
 
 | | |
 | --- | --- |
-| Version tested | 1.0.32 (commit `9dc4552`, plus changes not yet committed) |
+| Version tested | 1.0.33 (commit `1a1404e`, plus changes not yet committed) |
 | Date | 15 November 2026 |
 | Command | `cargo test --release` |
 | Result | **All 51 automated tests passed** |
@@ -118,8 +118,6 @@ each line says which build it was done on.
 | Compression: five PDFs from daily use at every setting | Sizes compared; results opened and rendered | 1.0.29 | A stronger setting never gives a larger file |
 | Compression: a nine-page file of certificates already at 150 dpi | All four settings; one page looked at, at 96 dpi | 1.0.30 | 22 to 24% smaller, 45% at 96 dpi; text readable, softer when zoomed |
 | The Microsoft Store package | Signed test package installed, started, removed | 1.0.26 | Installs and starts; Windows offers it for PDF and EPUB at once |
-| Documents opened while a reader is open: an EPUB, then two PDFs (one by a relative path from another folder) | Test build in its own data folder; window title, process count and a picture of the tab bar | 1.0.32 + changes | All three in one window as three tabs; the later starts handed over and exited (about 1 s, the time Windows takes to start the program at all) |
-| A scripted run while a reader is open | `--screenshot` with the same data folder | 1.0.32 + changes | Ran on its own; the open reader was not touched |
 | The website page and privacy policy | Opened in a browser from a local copy; light theme at phone width by the website session | 1.0.27 | No sideways scrolling, all pictures load |
 
 ## Measurements
@@ -143,7 +141,6 @@ Things no test covers and nobody has tried by hand. Each is a risk until someone
 - The assistant and translation against a live AI service (only against a local stand-in).
 - Working with the mouse: selecting text, clicking links, dragging thumbnails, drawing a signature.
 - Ctrl+Tab between tabs.
-- A double-click in File Explorer with the installed reader open (tested by starting the program the same way, not by clicking), and the reader coming to the front over other windows.
 - Scrolling by hand since pages are kept packed (a stutter when a page scrolls into view would show here).
 - The Compress window by hand, including its new messages.
 - Text recognition (OCR) from the Store package.

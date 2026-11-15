@@ -126,8 +126,6 @@ pub struct DevOptions {
 }
 
 pub struct ReaderApp {
-    /// Documents another start of the reader handed over (single.rs).
-    incoming: Option<std::sync::mpsc::Receiver<PathBuf>>,
     dev: DevOptions,
     dev_steps: Vec<String>,
     dev_wait: u32,
@@ -214,7 +212,6 @@ impl ReaderApp {
             .rev()
             .collect();
         let mut app = Self {
-            incoming: None,
             dev,
             dev_steps,
             dev_wait: 0,
@@ -714,27 +711,7 @@ impl ReaderApp {
 
     // ------------------------------------------------------------------ input
 
-    /// Open the documents another start of the reader hands over, each in a tab of its own.
-    pub fn receive_documents(&mut self, incoming: std::sync::mpsc::Receiver<PathBuf>) {
-        self.incoming = Some(incoming);
-    }
-
     fn handle_input(&mut self, ctx: &egui::Context) {
-        // Documents opened from File Explorer while this reader was open.
-        let handed: Vec<PathBuf> = self.incoming.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
-        if !handed.is_empty() {
-            ctx.send_viewport_cmd(ViewportCommand::Focus);
-        }
-        for path in handed.into_iter().filter(|p| p.is_file()) {
-            // The first goes to the front; any more wait in tabs, as with dropped files.
-            if self.opening || self.doc.as_ref().is_some_and(|d| d.path == path) {
-                if !self.session.tabs.iter().any(|t| t.path == path) {
-                    self.session.tabs.push(session::Place::new(&path));
-                }
-            } else {
-                self.request_open(path);
-            }
-        }
         // Files dropped on the window.
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
         // The first one opens; the others wait in tabs.
@@ -1861,7 +1838,7 @@ fn memory_usage() -> (usize, usize) {
 }
 
 /// Folder for things the app remembers on this computer (OCR language data, signatures).
-pub(crate) fn app_data_dir() -> PathBuf {
+fn app_data_dir() -> PathBuf {
     let base = if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
     } else if cfg!(target_os = "macos") {
