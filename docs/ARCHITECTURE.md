@@ -3,7 +3,7 @@
 How the reader is built and why. This document describes the code as it is; keep it true with every
 build (see "Keeping this document current" at the end).
 
-Last updated for version 1.0.35 (15 November 2026).
+Last updated for version 1.0.36 (15 November 2026).
 
 ## In one paragraph
 
@@ -227,8 +227,9 @@ About shows it with the commit's short id.
 
 - **Automated tests:** `cargo test --release`. `docs/TEST-REPORT.md` has the current results.
 - **Scripted runs:** the reader can drive itself. `--script "page=3;find=text;…"` runs steps,
-  `--screenshot file.ppm` saves the window and exits, `--size 1440x810` sets the window, `--bench`
-  prints time to first page and memory. The Store screenshots are made this way.
+  `--screenshot file.ppm` saves the window and exits, `--size 1440x810` sets the window, `--zoom 2`
+  draws everything twice as large as the screen's own scaling (so a 100 % screen gives the same picture as
+  a 200 % one), `--bench` prints time to first page and memory. The Store screenshots are made this way.
 - **Developer tools** in `crates/core/examples`: `render` (a page to a picture), `svg2rgba`, and others.
 - **Measuring:** `ROGEHA_FRAME_STATS=1` prints each frame's drawing time; `ROGEHA_PRINT_STATS=1` prints
   how much data a print job sent.

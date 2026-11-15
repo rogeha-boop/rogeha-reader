@@ -60,6 +60,10 @@ fn main() {
                     size = [w, h];
                 }
             }
+        } else if arg == "--zoom" {
+            // Developer option: draw everything this many times larger than the screen's own scaling.
+            // `--size 2880x1620 --zoom 2` on a 100 % screen gives the picture `--size 1440x810` gives at 200 %.
+            dev.zoom = args.next().and_then(|s| s.to_string_lossy().parse::<f32>().ok()).filter(|z| *z > 0.0);
         } else if arg == "--script" {
             // Developer option: actions to run before the screenshot, e.g. "page=3;rotate;find=text;ai".
             dev.script = args.next().map(|s| s.to_string_lossy().into_owned());

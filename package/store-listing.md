@@ -229,7 +229,7 @@ optional (max 200 characters).
 | `5-assistant.png` | The optional assistant answers a question and names the pages the answer comes from |
 | `6-dark-pages.png` | Dark pages and the dark theme for reading at night |
 | `7-find.png` | Find marks every hit on the page |
-| `8-about.png` | About, with the links to the source code and the legal notice (the file in the folder still shows a Feature overview link, removed in 1.0.35) |
+| `8-about.png` | About, with the links to the source code and the legal notice (taken from 1.0.35) |
 
 Screenshot 8 is optional: it shows the version number of the build it was taken from, so retake it from the
 build you submit (or leave it out).
@@ -281,7 +281,7 @@ Rogeha Reader is free software under the GNU AGPL, version 3 or later, built on 
 ## Retaking the screenshots
 
 The reader takes them itself: `--size` sets the window (1440 × 810 points is 2880 × 1620 dots on a 200 %
-screen), `--script` runs the steps, `--screenshot` saves the window as a PPM picture and exits. Set
+screen; on a 100 % screen use `--size 2880x1620 --zoom 2` instead), `--script` runs the steps, `--screenshot` saves the window as a PPM picture and exits. Set
 `ROGEHA_DATA_DIR` to an empty folder so your own settings and recent files are neither shown nor changed, and
 work on a copy of the tour, because some steps change the document.
 

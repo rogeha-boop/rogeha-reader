@@ -6,7 +6,7 @@ and checks by hand is kept by people: change it when such a check is done or a k
 
 | | |
 | --- | --- |
-| Version tested | 1.0.34 (commit `09a05af`, plus changes not yet committed) |
+| Version tested | 1.0.35 (commit `dc0bac5`, plus changes not yet committed) |
 | Date | 15 November 2026 |
 | Command | `cargo test --release` |
 | Result | **All 51 automated tests passed** |
@@ -120,6 +120,7 @@ each line says which build it was done on.
 | The Microsoft Store package | Signed test package installed, started, removed | 1.0.26 | Installs and starts; Windows offers it for PDF and EPUB at once |
 | The website page and privacy policy | Opened in a browser from a local copy; light theme at phone width by the website session | 1.0.27 | No sideways scrolling, all pictures load |
 | The About box without its Feature overview link (the toolbar button stays) | Script step `about`, picture looked at | 1.0.35 | Only "Source code" and "Legal notice" left in that row |
+| Store screenshot 8 retaken on a 100 % screen with `--size 2880x1620 --zoom 2` | Compared by eye with the old one, taken at 200 % | 1.0.36 | Same size (2880 x 1620) and layout; only the link and the version differ |
 
 ## Measurements
 

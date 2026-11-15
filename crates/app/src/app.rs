@@ -123,6 +123,8 @@ enum AfterSave {
 pub struct DevOptions {
     pub screenshot: Option<PathBuf>,
     pub script: Option<String>,
+    /// Draw everything this many times larger than the screen's own scaling (for screenshots).
+    pub zoom: Option<f32>,
 }
 
 pub struct ReaderApp {
@@ -198,6 +200,9 @@ impl ReaderApp {
         let ctx = ctx.clone();
         // Ctrl +/- zooms the document, not the whole UI.
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        if let Some(zoom) = dev.zoom {
+            ctx.set_zoom_factor(zoom);
+        }
         theme::apply(&ctx);
         let wake_ctx = ctx.clone();
         let worker = Worker::spawn(move || wake_ctx.request_repaint());
