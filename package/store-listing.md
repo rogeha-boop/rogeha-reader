@@ -1,7 +1,11 @@
 # Rogeha Reader: Microsoft Store submission
 
 Everything Partner Center asks for, ready to copy. Product: **Rogeha Reader**
-(`RogehaStudio.RogehaReader`). Not reserved or submitted yet.
+(`RogehaStudio.RogehaReader`), Store ID `9PH8X1J7HB1P`.
+
+**Published** in the Microsoft Store on 15 November 2026 with version 1.0.36:
+https://apps.microsoft.com/detail/9PH8X1J7HB1P. A later version is a new submission of the same product in
+Partner Center, with a package from `tools/package.ps1` (its version is always higher than the last one's).
 
 ## Before the first submission
 

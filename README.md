@@ -7,6 +7,10 @@ no GPU driver.
 **Status: early version.** Viewing, page editing, comments, forms, compression, OCR, signing and the
 AI assistant work; offline translation is planned (see [PLAN.md](PLAN.md)).
 
+**Get it** from the Microsoft Store: [apps.microsoft.com/detail/9PH8X1J7HB1P](https://apps.microsoft.com/detail/9PH8X1J7HB1P)
+(Windows 10 version 1809 or later, or Windows 11). What it can do, with screenshots:
+[rogehastudio.com/projects/rogeha-reader](https://rogehastudio.com/projects/rogeha-reader/).
+
 ## What works today
 
 - Opens **PDF, EPUB, CBZ, XPS, FB2, MOBI** (everything MuPDF reads)
@@ -132,6 +136,7 @@ Both are kept current with every build.
 
 ## Microsoft Store package
 
+The reader is published as [Store ID 9PH8X1J7HB1P](https://apps.microsoft.com/detail/9PH8X1J7HB1P).
 `tools/package.ps1` builds the reader and packs it, with its assistant, into an MSIX in `artifacts/`:
 
 ```powershell
