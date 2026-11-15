@@ -3,7 +3,7 @@
 How the reader is built and why. This document describes the code as it is; keep it true with every
 build (see "Keeping this document current" at the end).
 
-Last updated for version 1.0.31 (14 November 2026).
+Last updated for version 1.0.33 (15 November 2026).
 
 ## In one paragraph
 
@@ -118,11 +118,21 @@ UI afresh takes the same time (about 6 ms a frame). Frames are drawn only when s
 | `assistant.rs` | The assistant panel; runs the tools the assistant asks for |
 | `about.rs` | About, and the address of the Feature overview page |
 
+Outside `app/`, `single.rs` hands documents to the reader that is already open (see "One window").
+
 `icons.rs` draws the toolbar icons as vectors, `theme.rs` holds the Rogeha Studio design system's
 colours and type, and `install.rs` registers the reader with Windows (see "Installing").
 
 **Tabs are light.** Only the tab in front holds its document. Switching tabs reopens the file at the
 remembered page and zoom.
+
+**One window** (`single.rs`). The first reader claims a named pipe for the current user and its data
+folder, and listens on a thread of its own. A reader started later with a file (a double-click in File
+Explorer) hands the path over through the pipe and exits before making a window; the first reader opens
+it in a new tab and comes to the front. If nothing listens, the new reader opens its own window and
+listens from then on. Scripted runs (`--script`, `--screenshot`, `--bench`) neither hand over nor listen,
+and a different `ROGEHA_DATA_DIR` gives a different pipe. A start without a file still opens its own
+window. Windows only.
 
 ## Printing
 

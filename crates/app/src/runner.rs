@@ -130,6 +130,13 @@ impl Runner {
                         gfx.window.request_redraw();
                     }
                     ViewportCommand::Screenshot(callback) => screenshots.push(callback),
+                    ViewportCommand::Focus => {
+                        // A document was handed over from File Explorer: come to the front.
+                        if gfx.window.is_minimized() == Some(true) {
+                            gfx.window.set_minimized(false);
+                        }
+                        gfx.window.focus_window();
+                    }
                     _ => {}
                 }
             }
