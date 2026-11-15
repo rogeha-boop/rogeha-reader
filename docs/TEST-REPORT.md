@@ -6,7 +6,7 @@ and checks by hand is kept by people: change it when such a check is done or a k
 
 | | |
 | --- | --- |
-| Version tested | 1.0.33 (commit `1a1404e`, plus changes not yet committed) |
+| Version tested | 1.0.34 (commit `09a05af`, plus changes not yet committed) |
 | Date | 15 November 2026 |
 | Command | `cargo test --release` |
 | Result | **All 51 automated tests passed** |
@@ -119,6 +119,7 @@ each line says which build it was done on.
 | Compression: a nine-page file of certificates already at 150 dpi | All four settings; one page looked at, at 96 dpi | 1.0.30 | 22 to 24% smaller, 45% at 96 dpi; text readable, softer when zoomed |
 | The Microsoft Store package | Signed test package installed, started, removed | 1.0.26 | Installs and starts; Windows offers it for PDF and EPUB at once |
 | The website page and privacy policy | Opened in a browser from a local copy; light theme at phone width by the website session | 1.0.27 | No sideways scrolling, all pictures load |
+| The About box without its Feature overview link (the toolbar button stays) | Script step `about`, picture looked at | 1.0.35 | Only "Source code" and "Legal notice" left in that row |
 
 ## Measurements
 

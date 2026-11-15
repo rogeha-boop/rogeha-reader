@@ -126,7 +126,6 @@ impl ReaderApp {
                 });
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 16.0;
-                    ui.hyperlink_to("Feature overview", FEATURES_URL);
                     ui.hyperlink_to("Source code", SOURCE_URL);
                     ui.hyperlink_to("Legal notice", LEGAL_URL);
                 });

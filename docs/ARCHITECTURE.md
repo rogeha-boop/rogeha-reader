@@ -3,7 +3,7 @@
 How the reader is built and why. This document describes the code as it is; keep it true with every
 build (see "Keeping this document current" at the end).
 
-Last updated for version 1.0.34 (15 November 2026).
+Last updated for version 1.0.35 (15 November 2026).
 
 ## In one paragraph
 
@@ -116,7 +116,7 @@ UI afresh takes the same time (about 6 ms a frame). Frames are drawn only when s
 | `print.rs` | Printing (see below) |
 | `compress.rs`, `ocr.rs` | The Compress and Recognise text windows; both start a helper process |
 | `assistant.rs` | The assistant panel; runs the tools the assistant asks for |
-| `about.rs` | About, and the address of the Feature overview page |
+| `about.rs` | About, and the address of the Feature overview page (opened by the toolbar button only) |
 
 `icons.rs` draws the toolbar icons as vectors, `theme.rs` holds the Rogeha Studio design system's
 colours and type, and `install.rs` registers the reader with Windows (see "Installing").

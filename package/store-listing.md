@@ -229,7 +229,7 @@ optional (max 200 characters).
 | `5-assistant.png` | The optional assistant answers a question and names the pages the answer comes from |
 | `6-dark-pages.png` | Dark pages and the dark theme for reading at night |
 | `7-find.png` | Find marks every hit on the page |
-| `8-about.png` | About, with the links to the feature overview, the source code and the legal notice |
+| `8-about.png` | About, with the links to the source code and the legal notice (the file in the folder still shows a Feature overview link, removed in 1.0.35) |
 
 Screenshot 8 is optional: it shows the version number of the build it was taken from, so retake it from the
 build you submit (or leave it out).
