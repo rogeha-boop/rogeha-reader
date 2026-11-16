@@ -3,7 +3,7 @@
 How the reader is built and why. This document describes the code as it is; keep it true with every
 build (see "Keeping this document current" at the end).
 
-Last updated for version 1.1.43 (16 November 2026).
+Last updated for version 1.1.44 (16 November 2026), the 1.1 Store package.
 
 ## In one paragraph
 

@@ -36,7 +36,7 @@ Partner Center, with a package from `tools/package.ps1` (its version is always h
 | --- | --- | --- |
 | 1.0.36.0 | `c58d9a1` | First release: passed certification and published on 15 November 2026 |
 | 1.0.40.0 | `e781031` | Black out (redact). Built on 16 November 2026 |
-| 1.1.x.0 | `main` | The same reader as 1.0.40 under the version number 1.1 (asked for on 16 November 2026). Not built yet |
+| 1.1.44.0 | branch `store-1.1.44` (pull request "Store package 1.1.44") | Version 1.1: the same reader as 1.0.40 under the new number. Built on 16 November 2026 for submission; submit this one rather than 1.0.40 |
 
 ## Checks before uploading
 
@@ -165,7 +165,7 @@ Made by Rogeha Studio, Switzerland.
 ### What's new in this version (max 1,500 characters)
 
 ```
-New: Black out (redact), in the Tools menu. Send a bank statement or a bill as proof of address without showing what you spent: drag a box over what nobody should see, mark a name or number wherever it appears, or use the same box on every page. The copy you save has the text and picture under each box taken out, not just covered, so it cannot be copied, searched or uncovered. It works on scans too. The original file is not changed.
+Version 1.1. New: Black out (redact), in the Tools menu. Send a bank statement or a bill as proof of address without showing what you spent: drag a box over what nobody should see, mark a name or number wherever it appears, or use the same box on every page. The copy you save has the text and picture under each box taken out, not just covered, so it cannot be copied, searched or uncovered. It works on scans too. The original file is not changed.
 
 Also: the About window no longer repeats the Feature overview link; the button beside it opens the page.
 ```
