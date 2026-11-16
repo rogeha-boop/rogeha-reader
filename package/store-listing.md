@@ -3,7 +3,7 @@
 Everything Partner Center asks for, ready to copy. Product: **Rogeha Reader**
 (`RogehaStudio.RogehaReader`), Store ID `9PH8X1J7HB1P`.
 
-**Published** in the Microsoft Store on 15 November 2026 with version 1.0.36:
+**Published** in the Microsoft Store on 15 November 2026 with version 1.0.36, and as 1.1.44 on 16 November 2026:
 https://apps.microsoft.com/detail/9PH8X1J7HB1P. A later version is a new submission of the same product in
 Partner Center, with a package from `tools/package.ps1` (its version is always higher than the last one's).
 
@@ -35,8 +35,8 @@ Partner Center, with a package from `tools/package.ps1` (its version is always h
 | Version | Built from | Status |
 | --- | --- | --- |
 | 1.0.36.0 | `c58d9a1` | First release: passed certification and published on 15 November 2026 |
-| 1.0.40.0 | `e781031` | Black out (redact). Built on 16 November 2026 |
-| 1.1.44.0 | branch `store-1.1.44` (pull request "Store package 1.1.44") | Version 1.1: the same reader as 1.0.40 under the new number. Built on 16 November 2026 for submission; submit this one rather than 1.0.40 |
+| 1.0.40.0 | `e781031` | Black out (redact). Built on 16 November 2026; 1.1.44 was published after it |
+| 1.1.44.0 | `31e3ac8` (merged as `ab7f567`, pull request #3) | Version 1.1 with Black out. Passed certification and published on 16 November 2026. The Store shows the new "What's new" and the 20th product feature; its short description and description were still the 1.0 texts afterwards |
 
 ## Checks before uploading
 
