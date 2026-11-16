@@ -17,6 +17,7 @@ pub mod engine;
 pub mod fonts;
 pub mod forms;
 pub mod ocr;
+pub mod redact;
 pub mod signature;
 pub mod worker;
 
@@ -25,6 +26,7 @@ pub use dsig::{Identity, SignOptions, SignatureInfo, SignatureStatus, format_tim
 pub use compress::{CompressStats, Preset, compress_pdf, compress_pdf_with, subset_fonts};
 pub use signature::{INK_BLACK, INK_BLUE, SignatureArt, load_signature_image, render_signature};
 pub use ocr::{OcrStats, ocr_pdf};
+pub use redact::{RedactArea, RedactReport};
 pub use forms::{FieldKind, FormField};
 pub use engine::{Engine, HitQuad, LinkTarget, OutlineItem, PageImage, PageLink, PageRgb, render_svg};
 pub use worker::{DocInfo, Event, RenderKey, Request, Worker};

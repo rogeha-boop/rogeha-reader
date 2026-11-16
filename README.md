@@ -49,6 +49,10 @@ AI assistant work; offline translation is planned (see [PLAN.md](PLAN.md)).
   at the two smallest settings the print shop's colour profile). Text and black-and-white pages are kept exactly, and the original file is never changed. The
   settings only differ for pictures above their resolution, so the window says when pictures were a small
   part of the file or were already stored below the setting's limit
+- **Black out (redact)** (Tools menu): mark what nobody should see, for example the payments on a bank
+  statement you send as proof of address, by dragging a box, by a text wherever it appears, or the same box
+  on every page. The copy you save has the content under the boxes taken out, not just covered, so it cannot
+  be copied, searched or uncovered; the original file is not changed
 - Select and copy text (drag, then Copy or Ctrl+C)
 - Text search with highlighted matches
 - Drag and drop, open from the command line (`rogeha-reader file.pdf`)

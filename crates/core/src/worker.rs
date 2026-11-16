@@ -9,6 +9,7 @@ use crate::annotations::{AnnotInfo, MarkupKind, TextSelection};
 use crate::engine::{Engine, HitQuad, NEEDS_PASSWORD, OutlineItem, PageImage, PageLink, WRONG_PASSWORD};
 use crate::dsig::{Identity, SignOptions, SignatureInfo};
 use crate::forms::FormField;
+use crate::redact::{RedactArea, RedactReport};
 use crate::signature::SignatureArt;
 
 /// Identifies one rendered image: which page, at which scale, for which document state.
@@ -88,6 +89,11 @@ pub enum Request {
     SignDocument { target: Option<PathBuf>, p12: Vec<u8>, password: String, options: SignOptions },
     /// Send the document's digital signatures now, and again after every change.
     ListSignatures,
+    /// Black out these areas for good and write the result to `target` (a new file); answered
+    /// with [`Event::Redacted`]. Nothing is written when the redaction fails.
+    Redact { areas: Vec<RedactArea>, target: PathBuf },
+    /// Every place a text occurs, for marking it to black out; answered with [`Event::FoundAll`].
+    FindAll { query: String },
     Close,
 }
 
@@ -116,6 +122,10 @@ pub enum Event {
     Signatures { generation: u64, list: Vec<SignatureInfo> },
     /// The document was signed and written to this file.
     Signed(PathBuf),
+    /// Areas were blacked out and the document was written to this file.
+    Redacted { path: PathBuf, report: RedactReport },
+    /// Answer to [`Request::FindAll`].
+    FoundAll { query: String, hits: Vec<(usize, HitQuad)> },
     Closed,
     /// The file needs a password; `wrong` when one was tried and did not fit.
     PasswordNeeded { path: PathBuf, wrong: bool },
@@ -305,6 +315,18 @@ fn send_annotations(st: &State, emit: &impl Fn(Event) -> bool) -> bool {
     }
 }
 
+fn find_all(engine: &Engine, query: &str) -> Vec<(usize, HitQuad)> {
+    let mut hits = Vec::new();
+    if !query.is_empty() {
+        for page in 0..engine.page_count() {
+            if let Ok(quads) = engine.search_page(page, query) {
+                hits.extend(quads.into_iter().map(|q| (page, q)));
+            }
+        }
+    }
+    hits
+}
+
 fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
     // Run an edit on the open document, then announce the new state.
     macro_rules! edit {
@@ -389,15 +411,26 @@ fn handle(st: &mut State, req: Request, emit: &impl Fn(Event) -> bool) -> bool {
         }
         Request::Search { query } => {
             let Some(engine) = &st.engine else { return true };
-            let mut hits = Vec::new();
-            if !query.is_empty() {
-                for page in 0..engine.page_count() {
-                    if let Ok(quads) = engine.search_page(page, &query) {
-                        hits.extend(quads.into_iter().map(|q| (page, q)));
-                    }
-                }
-            }
+            let hits = find_all(engine, &query);
             emit(Event::SearchResults { query, hits })
+        }
+        Request::FindAll { query } => {
+            let Some(engine) = &st.engine else { return true };
+            let hits = find_all(engine, &query);
+            emit(Event::FoundAll { query, hits })
+        }
+        Request::Redact { areas, target } => {
+            let Some(engine) = st.engine.as_mut() else {
+                return emit(Event::Error("No document is open".into()));
+            };
+            let report = match engine.edit(|e| e.redact(&areas)) {
+                Ok(report) => report,
+                Err(e) => return emit(Event::Error(e)),
+            };
+            match engine.save(Some(&target)) {
+                Ok(path) => changed(st, emit) && emit(Event::Redacted { path, report }),
+                Err(e) => changed(st, emit) && emit(Event::Error(e)),
+            }
         }
         Request::PageText { page } => {
             let Some(engine) = &st.engine else { return true };

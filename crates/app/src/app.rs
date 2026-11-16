@@ -25,6 +25,7 @@ mod ocr;
 mod pages_panel;
 mod pagestore;
 mod print;
+mod redact;
 mod session;
 mod sign;
 
@@ -169,6 +170,7 @@ pub struct ReaderApp {
     search: Search,
     comments: comments::Comments,
     compress: compress::CompressUi,
+    redact: redact::RedactUi,
     about: about::About,
     ocr: ocr::OcrUi,
     sign: sign::SignUi,
@@ -252,6 +254,7 @@ impl ReaderApp {
             search: Search::default(),
             comments: comments::Comments::default(),
             compress: compress::CompressUi::default(),
+            redact: redact::RedactUi::default(),
             about: about::About::default(),
             ocr: ocr::OcrUi::default(),
             sign: sign::SignUi::default(),
@@ -514,6 +517,8 @@ impl ReaderApp {
                         // Thumbnails are redrawn; a selection survives only a pure reorder or rotation.
                         let same_count = self.doc.as_ref().is_some_and(|d| same_file && d.page_sizes.len() == info.page_sizes.len());
                         self.pages.reset(same_count);
+                        // Marked boxes are tied to the pages as they were.
+                        self.redact.reset();
                     }
                     if !same_file {
                         self.comments.reset_for_new_document();
@@ -633,6 +638,8 @@ impl ReaderApp {
                         self.digital.list = list;
                     }
                 }
+                Event::Redacted { path, report } => self.redact_done(path, report),
+                Event::FoundAll { query, hits } => self.redact_found(query, hits),
                 Event::Signed(path) => {
                     self.digital.busy = false;
                     self.sign.open = false;
@@ -669,6 +676,7 @@ impl ReaderApp {
                     self.print_busy = false;
                     self.session.save_as_target = None;
                     self.session.closing_tab = None;
+                    self.redact.busy = false;
                     self.assistant_edit_outcome(Err(&message));
                     self.error(message);
                 }
@@ -1083,6 +1091,15 @@ impl ReaderApp {
                     ui.close();
                     self.compress.open = true;
                 }
+                if ui
+                    .add_enabled(can_edit, egui::Button::new("Black out (redact)…"))
+                    .on_hover_text("Take private details out of a copy for good, for example the payments on a bank statement you send as proof of address")
+                    .on_disabled_hover_text(pdf_only)
+                    .clicked()
+                {
+                    ui.close();
+                    self.redact.open = true;
+                }
                 ui.separator();
                 let language = self.session.translate_to.clone();
                 if ui
@@ -1407,6 +1424,10 @@ impl ReaderApp {
             // Placing a signature takes over the mouse from text selection.
             self.placement_interactions(&ctx, &page_hits, scale);
             self.placement_overlay(ui, &page_hits, scale);
+        } else if self.redact.open {
+            // Marking areas to black out takes over the mouse from text selection.
+            self.redact_interactions(&ctx, &page_hits, scale);
+            self.redact_overlay(ui, &page_hits, scale);
         } else {
             self.page_interactions(&ctx, &page_hits, scale);
             self.link_interactions(&ctx, &page_hits, scale);
@@ -1523,6 +1544,7 @@ impl ReaderApp {
             && self.last_want.is_empty()
             && !self.search.busy
             && !self.compress_busy()
+            && !self.redact.busy
             && !self.ocr_busy()
             && !self.digital_busy()
             && !self.assistant_busy();
@@ -1662,6 +1684,22 @@ impl ReaderApp {
                         self.compress.open = true;
                         self.start_compress(ctx, Some(PathBuf::from(arg)));
                     }
+                    "redact" => self.redact.open = true,
+                    // redactbox=x0,y0,x1,y1 in page points on the current page
+                    "redactbox" => {
+                        let v: Vec<f32> = arg.split(',').filter_map(|n| n.parse().ok()).collect();
+                        if let [x0, y0, x1, y1] = v[..] {
+                            self.add_box(self.current_page, (x0, y0, x1, y1));
+                        }
+                    }
+                    "redactevery" => self.redact.every_page = arg != "off",
+                    // redactfind=<text>: mark every place it appears
+                    "redactfind" => {
+                        self.redact.find = arg.to_owned();
+                        self.redact_find();
+                    }
+                    // redactsave=<output path>
+                    "redactsave" => self.redact_apply(Some(PathBuf::from(arg))),
                     "opencomment" => {
                         if let Some(a) = self.comments.list.last() {
                             self.open_comment((a.page, a.xref), None);
@@ -1790,6 +1828,7 @@ impl ReaderApp {
         self.password_window(&ctx);
         self.comment_editor(&ctx);
         self.compress_window(&ctx);
+        self.redact_window(&ctx);
         self.about_window(&ctx);
         self.ocr_window(&ctx);
         self.sign_window(&ctx);

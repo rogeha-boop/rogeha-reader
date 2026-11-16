@@ -1001,3 +1001,76 @@ fn changes_can_be_undone_and_redone() {
     drop(saved);
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn redaction_takes_the_content_out_instead_of_covering_it() {
+    use rogeha_core::RedactArea;
+    // A page with a line of text, a picture, and a web link over the first word.
+    let scan = scan_fixture("redact");
+    let path = scan.with_extension("link.pdf");
+    {
+        let mut doc = PdfDocument::open(scan.to_str().unwrap()).unwrap();
+        let link = doc
+            .new_object_from_str("<< /Type /Annot /Subtype /Link /Rect [72 690 200 720] /A << /S /URI /URI (https://example.org) >> >>")
+            .unwrap();
+        let link = doc.add_object(&link).unwrap();
+        let mut annots = doc.new_array().unwrap();
+        annots.array_push(link).unwrap();
+        doc.find_page(0).unwrap().dict_put("Annots", annots).unwrap();
+        doc.save(path.to_str().unwrap()).unwrap();
+    }
+    std::fs::remove_file(&scan).unwrap();
+
+    let mut engine = Engine::open(&path).unwrap();
+    assert_eq!(engine.links(0).unwrap().len(), 1);
+    engine.add_note(0, (80.0, 125.0), "Paid at the corner shop", "Ada", COMMENT_PALETTE[0]).unwrap();
+    engine.add_note(0, (400.0, 600.0), "Keep me", "Ada", COMMENT_PALETTE[0]).unwrap();
+    let before = engine.render(0, 1.0).unwrap();
+    let at = |img: &rogeha_core::PageImage, x: usize, y: usize| img.pixels[y * img.width + x];
+    let colourful = |p: u32| p != 0 && p != 0x00FF_FFFF;
+    assert!(colourful(at(&before, 200, 530)) && colourful(at(&before, 100, 620)), "the picture is where the test expects it");
+
+    // Black out the first word and a square in the middle of the picture.
+    let areas = [
+        RedactArea { page: 0, rect: (128.0, 150.0, 70.0, 115.0) }, // corners in any order
+        RedactArea { page: 0, rect: (150.0, 480.0, 250.0, 580.0) },
+    ];
+    assert!(engine.redact(&[RedactArea { page: 3, rect: (0.0, 0.0, 10.0, 10.0) }]).is_err());
+    assert!(engine.redact(&[RedactArea { page: 0, rect: (5.0, 5.0, 5.2, 90.0) }]).is_err(), "too thin to count");
+    let report = engine.redact(&areas).unwrap();
+    assert_eq!((report.areas, report.pages, report.annotations_removed), (2, 1, 2), "the note and the link under the word");
+    assert!(engine.is_dirty());
+
+    let out = path.with_extension("redacted.pdf");
+    engine.save(Some(&out)).unwrap();
+    drop(engine);
+
+    let redacted = Engine::open(&out).unwrap();
+    let text = redacted.page_text(0).unwrap();
+    assert!(!text.contains("Hello"), "the word is gone from the text: {text:?}");
+    assert!(text.contains("annotated world"), "the rest of the line stays: {text:?}");
+    assert!(redacted.search_page(0, "Hello").unwrap().is_empty());
+    assert!(redacted.links(0).unwrap().is_empty());
+    let left: Vec<String> = redacted.all_annotations().into_iter().map(|a| a.contents).collect();
+    assert_eq!(left, vec!["Keep me".to_owned()], "no redaction marks or covered comments are left");
+    let after = redacted.render(0, 1.0).unwrap();
+    assert_eq!(at(&after, 200, 530), 0, "the picture is black under the box");
+    assert_eq!(at(&after, 100, 125), 0, "a black box where the word was");
+    assert!(colourful(at(&after, 100, 620)), "the rest of the picture stays");
+    drop(redacted);
+
+    // The file itself does not hold the word any more, in any stream.
+    let doc = PdfDocument::open(out.to_str().unwrap()).unwrap();
+    for i in 1..doc.count_objects().unwrap() as i32 {
+        let Ok(obj) = doc.new_indirect(i, 0) else { continue };
+        if obj.is_stream().unwrap_or(false) {
+            let bytes = obj.read_stream().unwrap_or_default();
+            assert!(!bytes.windows(5).any(|w| w == b"Hello"), "object {i} still holds the word");
+        }
+    }
+    drop(doc);
+    // The original is left alone.
+    assert!(Engine::open(&path).unwrap().page_text(0).unwrap().contains("Hello"));
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_file(&out).unwrap();
+}

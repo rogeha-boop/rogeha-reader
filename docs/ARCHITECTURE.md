@@ -3,7 +3,7 @@
 How the reader is built and why. This document describes the code as it is; keep it true with every
 build (see "Keeping this document current" at the end).
 
-Last updated for version 1.0.36 (15 November 2026).
+Last updated for version 1.0.38 (16 November 2026).
 
 ## In one paragraph
 
@@ -51,6 +51,7 @@ it embeds their program files.
 | `signature.rs` | A drawn, typed or photographed signature stamped onto a page |
 | `dsig.rs` | Digital signatures: signing with a PKCS#12 certificate, and verifying. Pure Rust (rsa, sha1, p12-keystore) |
 | `compress.rs` | Making PDFs smaller (see "Compression" below) |
+| `redact.rs` | Blacking out areas for good (see "Blacking out" below) |
 | `ocr.rs` | Text recognition with Tesseract, adding an invisible text layer |
 | `fonts.rs` | Fonts installed in Windows, for documents that do not carry their own |
 
@@ -115,6 +116,7 @@ UI afresh takes the same time (about 6 ms a frame). Frames are drawn only when s
 | `sign.rs`, `dsign.rs` | Signing by hand; signing with a certificate and checking signatures |
 | `print.rs` | Printing (see below) |
 | `compress.rs`, `ocr.rs` | The Compress and Recognise text windows; both start a helper process |
+| `redact.rs` | The Black out window: marking boxes by dragging, by text, or on every page |
 | `assistant.rs` | The assistant panel; runs the tools the assistant asks for |
 | `about.rs` | About, and the address of the Feature overview page (opened by the toolbar button only) |
 
@@ -156,6 +158,25 @@ so no seam can show in letters. Windows only (GDI).
 Where pictures are a small part of the file, the gentler settings and "pictures left alone" are tried
 as well and the smallest result is kept, so a stronger setting never gives a larger file. The settings
 are 300, 200, 144 and 96 dpi.
+
+## Blacking out
+
+For documents sent as proof of something, such as a bank statement as proof of address, with the rest
+blacked out. A black box drawn on a page hides nothing: the text under it can still be copied. So the
+engine (`core/redact.rs`) uses MuPDF's redaction. For each marked area it:
+
+1. Deletes comments, links and form fields that overlap it (a comment could quote what is hidden). Links
+   are taken out of the page's `/Annots` list by hand, because MuPDF keeps them apart from annotations.
+2. Adds a redaction annotation and applies it: text under the area is removed (the visible text and a
+   scan's invisible text layer), picture dots under it are blacked out in the picture itself, drawings
+   inside it are removed, and a black box is painted.
+3. Drops the page's thumbnail, which would still show the old page.
+
+The worker then writes the result to a new file, in one request, so nothing is written if the blacking
+out fails. Content was removed, so the save rewrites the whole file and leaves nothing of the old bytes.
+The window refuses the original's own name, and the tab then shows the new copy. The window
+(`app/redact.rs`) marks areas by dragging a box, by a text (every place it appears), or the same box on
+every page, for a statement's list of payments.
 
 ## Helper processes
 
@@ -243,6 +264,8 @@ About shows it with the commit's short id.
 - Tabs reopen their file when switched to; search results and the assistant's conversation do not
   survive a tab switch.
 - The undo history starts over on save.
+- Blacking out works on what is on the pages. Bookmarks, the document's title and other properties, and
+  files attached to the PDF are left as they are.
 - The installer (not the Store package) needs the Visual C++ runtime to be present on the computer.
 
 More detail on these, with numbers, is in `PLAN.md` under "Known gaps".

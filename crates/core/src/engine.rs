@@ -460,6 +460,12 @@ impl Engine {
         self.dirty = true;
     }
 
+    /// Content was taken out: the next save rewrites the whole file so it is really gone.
+    pub(crate) fn mark_removed_content(&mut self) {
+        self.dirty = true;
+        self.removed_content = true;
+    }
+
     pub(crate) fn pdf_mut(&mut self) -> Result<&mut PdfDocument> {
         match &mut self.doc {
             Doc::Pdf(d) => Ok(d),
