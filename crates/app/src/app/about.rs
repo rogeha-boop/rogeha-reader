@@ -12,8 +12,9 @@ const COPYRIGHT: &str = "© 2026 Rogeha Studio";
 const SUPPORT_EMAIL: &str = "support@rogehastudio.com";
 const SOURCE_URL: &str = "https://github.com/rogeha-boop/rogeha-reader";
 // Links to the studio's website carry `?from=app`, so the website's own visitor count can tell
-// pages opened from the reader apart from other visits. The reader itself sends nothing.
-const LEGAL_URL: &str = "https://rogehastudio.com/legal.html?from=app";
+// pages opened from the reader apart from other visits. A page all the studio's apps share (the
+// legal notice) names the app: `?from=app-rogeha-reader`. The reader itself sends nothing.
+const LEGAL_URL: &str = "https://rogehastudio.com/legal.html?from=app-rogeha-reader";
 /// The page on the studio's website that shows what the reader can do.
 pub(super) const FEATURES_URL: &str = "https://rogehastudio.com/projects/rogeha-reader/?from=app";
 
@@ -161,8 +162,7 @@ impl ReaderApp {
 mod tests {
     #[test]
     fn website_links_say_they_come_from_the_app() {
-        for url in [super::FEATURES_URL, super::LEGAL_URL] {
-            assert!(url.starts_with("https://rogehastudio.com/") && url.ends_with("?from=app"), "{url}");
-        }
+        assert_eq!(super::FEATURES_URL, "https://rogehastudio.com/projects/rogeha-reader/?from=app");
+        assert_eq!(super::LEGAL_URL, "https://rogehastudio.com/legal.html?from=app-rogeha-reader");
     }
 }

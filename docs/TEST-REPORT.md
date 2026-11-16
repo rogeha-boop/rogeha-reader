@@ -6,7 +6,7 @@ and checks by hand is kept by people: change it when such a check is done or a k
 
 | | |
 | --- | --- |
-| Version tested | 1.1.45 (commit `6c6f453`, plus changes not yet committed) |
+| Version tested | 1.1.46 (commit `c53b014`, plus changes not yet committed) |
 | Date | 16 November 2026 |
 | Command | `cargo test --release` |
 | Result | **All 55 automated tests passed** |
@@ -129,7 +129,7 @@ each line says which build it was done on.
 | Black out on a scan without text: the same statement as one JPEG picture per page, payments and account number boxed | Script steps; the pictures inside the copy read with PyMuPDF and compared with the original's | 1.0.38 | In the copy the boxed parts of each picture are blank, the address in the same picture is kept, and a black box is drawn over them |
 | Version number 1.1 | `rogeha-reader.exe --version` from the build | 1.1.43 | Shows 1.1 with the build number (1.1.42 plus the uncommitted change before the commit) |
 | The 1.1 Store package | Built with `tools/package.ps1` from this commit; the reader in it asked for its version | 1.1.44 | See the pull request for the size and checksum |
-| The website links with `?from=app` | Both addresses opened from this computer | 1.1.46 | The Feature overview page and the Legal notice both answer with the page (200) |
+| The website links with `?from=app` (Feature overview) and `?from=app-rogeha-reader` (Legal notice) | Both addresses opened from this computer | 1.1.47 | Both answer with the page (200) |
 
 ## Measurements
 

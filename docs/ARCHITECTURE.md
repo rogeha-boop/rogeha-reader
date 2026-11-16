@@ -3,7 +3,7 @@
 How the reader is built and why. This document describes the code as it is; keep it true with every
 build (see "Keeping this document current" at the end).
 
-Last updated for version 1.1.46 (16 November 2026).
+Last updated for version 1.1.47 (16 November 2026).
 
 ## In one paragraph
 
@@ -225,8 +225,9 @@ Only in three cases, each started by the user: the assistant (the text of the pa
 to the chosen service), the one-time download of language data for text recognition, and the Feature
 overview button, which opens the reader's page on rogehastudio.com in the browser.
 
-The links to rogehastudio.com (Feature overview, and Legal notice in About) end in `?from=app`, so the
-website's own visitor count can tell pages opened from the reader apart from other visits. The reader
+The links to rogehastudio.com end in a tag, so the website's own visitor count can tell pages opened from
+the reader apart from other visits: Feature overview with `?from=app`, and the Legal notice in About,
+which all the studio's apps share, with `?from=app-rogeha-reader`. The reader
 itself sends nothing: the tag is part of the address the browser opens, and only when the user clicks.
 
 ## Installing
