@@ -6,10 +6,10 @@ and checks by hand is kept by people: change it when such a check is done or a k
 
 | | |
 | --- | --- |
-| Version tested | 1.1.43 (commit `672897f`, plus changes not yet committed) |
+| Version tested | 1.1.46 (commit `c53b014`, plus changes not yet committed) |
 | Date | 16 November 2026 |
 | Command | `cargo test --release` |
-| Result | **All 54 automated tests passed** |
+| Result | **All 55 automated tests passed** |
 
 The version above is the build the tests ran on. Committing this report adds one to the build number.
 
@@ -20,8 +20,8 @@ The version above is the build the tests ran on. Committing this report adds one
 | Assistant | 2 | 2 | 0 |
 | Engine, small parts | 7 | 7 | 0 |
 | Engine, on real documents | 27 | 27 | 0 |
-| Reader | 18 | 18 | 0 |
-| **All** | **54** | **54** | **0** |
+| Reader | 19 | 19 | 0 |
+| **All** | **55** | **55** | **0** |
 
 ### Assistant
 
@@ -86,6 +86,7 @@ Page store, printing, dark pages, the assistant's citations, page layout (crates
 
 | Test | Result |
 | --- | --- |
+| Website links say they come from the app | passed |
 | Citations become links | passed |
 | A dot is read as red green blue | passed |
 | Packing and unpacking gives the same page back | passed |
@@ -128,6 +129,7 @@ each line says which build it was done on.
 | Black out on a scan without text: the same statement as one JPEG picture per page, payments and account number boxed | Script steps; the pictures inside the copy read with PyMuPDF and compared with the original's | 1.0.38 | In the copy the boxed parts of each picture are blank, the address in the same picture is kept, and a black box is drawn over them |
 | Version number 1.1 | `rogeha-reader.exe --version` from the build | 1.1.43 | Shows 1.1 with the build number (1.1.42 plus the uncommitted change before the commit) |
 | The 1.1 Store package | Built with `tools/package.ps1` from this commit; the reader in it asked for its version | 1.1.44 | See the pull request for the size and checksum |
+| The website links with `?from=app` (Feature overview) and `?from=app-rogeha-reader` (Legal notice) | Both addresses opened from this computer | 1.1.47 | Both answer with the page (200) |
 
 ## Measurements
 

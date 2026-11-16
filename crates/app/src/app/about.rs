@@ -11,9 +11,12 @@ const APP_NAME: &str = "Rogeha Reader";
 const COPYRIGHT: &str = "© 2026 Rogeha Studio";
 const SUPPORT_EMAIL: &str = "support@rogehastudio.com";
 const SOURCE_URL: &str = "https://github.com/rogeha-boop/rogeha-reader";
-const LEGAL_URL: &str = "https://rogehastudio.com/legal.html";
+// Links to the studio's website carry `?from=app`, so the website's own visitor count can tell
+// pages opened from the reader apart from other visits. A page all the studio's apps share (the
+// legal notice) names the app: `?from=app-rogeha-reader`. The reader itself sends nothing.
+const LEGAL_URL: &str = "https://rogehastudio.com/legal.html?from=app-rogeha-reader";
 /// The page on the studio's website that shows what the reader can do.
-pub(super) const FEATURES_URL: &str = "https://rogehastudio.com/projects/rogeha-reader/";
+pub(super) const FEATURES_URL: &str = "https://rogehastudio.com/projects/rogeha-reader/?from=app";
 
 const BANNER_LIGHT: &[u8] = include_bytes!("../../assets/rogeha-studio-cover-light.svg");
 const BANNER_DARK: &[u8] = include_bytes!("../../assets/rogeha-studio-cover-dark.svg");
@@ -152,5 +155,14 @@ impl ReaderApp {
         if close || !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.about.open = false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn website_links_say_they_come_from_the_app() {
+        assert_eq!(super::FEATURES_URL, "https://rogehastudio.com/projects/rogeha-reader/?from=app");
+        assert_eq!(super::LEGAL_URL, "https://rogehastudio.com/legal.html?from=app-rogeha-reader");
     }
 }
