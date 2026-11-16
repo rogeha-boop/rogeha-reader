@@ -34,7 +34,8 @@ Partner Center, with a package from `tools/package.ps1` (its version is always h
 
 | Version | Built from | Status |
 | --- | --- | --- |
-| 1.0.x.0 | this repo, `main` | Not submitted yet. A test package of 1.0.26.0 was installed, started and removed on 14 November 2026 |
+| 1.0.36.0 | `c58d9a1` | First release: passed certification and published on 15 November 2026 |
+| 1.0.40.0 | `main` | Black out (redact). Built on 16 November 2026 for submission |
 
 ## Checks before uploading
 
@@ -107,7 +108,7 @@ Rogeha Reader
 ### Short description (max 270 characters)
 
 ```
-A fast, free reader for PDF and EPUB files. Comment, highlight, sign, fill in forms, reorder pages, compress scans and make them searchable. An optional AI assistant answers questions about your document, with your own key. Reading works offline.
+A fast, free reader for PDF and EPUB files. Comment, highlight, sign, fill in forms, black out private details, reorder pages, compress scans and make them searchable. An optional AI assistant answers questions about your document, with your own key. Works offline.
 ```
 
 ### Description (max 10,000 characters)
@@ -138,6 +139,7 @@ SIGN AND FILL IN
 WORK WITH PAGES
 • Thumbnails of all pages. Reorder by dragging, rotate, delete, and add the pages of other PDFs.
 • Compress scanned PDFs, with a preview of how much smaller the file becomes.
+• Black out private details for good, for example the payments on a bank statement you send as proof of address. Drag a box, mark a text wherever it appears, or the same box on every page. The text and picture under each box are taken out of the copy you save, not just covered, and the original file stays as it is.
 • Recognise text (OCR) in scans, so they can be searched and copied. The language data is downloaded once, on request.
 • Print through the Windows print dialog; comments, form entries and signatures are printed as shown.
 
@@ -161,7 +163,9 @@ Made by Rogeha Studio, Switzerland.
 ### What's new in this version (max 1,500 characters)
 
 ```
-First release in the Microsoft Store.
+New: Black out (redact), in the Tools menu. Send a bank statement or a bill as proof of address without showing what you spent: drag a box over what nobody should see, mark a name or number wherever it appears, or use the same box on every page. The copy you save has the text and picture under each box taken out, not just covered, so it cannot be copied, searched or uncovered. It works on scans too. The original file is not changed.
+
+Also: the About window no longer repeats the Feature overview link; the button beside it opens the page.
 ```
 
 ### Product features (up to 20, max 200 characters each)
@@ -186,6 +190,7 @@ First release in the Microsoft Store.
 17. No account, no advertising, no usage statistics; reading works offline
 18. Small: about 45 MB of memory with a document open, no browser engine inside
 19. Free and open source (AGPL-3.0)
+20. Black out private details for good: the text and picture under each box is taken out of the copy, not just covered
 ```
 
 ### Search terms (up to 7, max 30 characters each, 21 words in total)
