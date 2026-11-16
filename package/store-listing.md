@@ -26,7 +26,7 @@ Partner Center, with a package from `tools/package.ps1` (its version is always h
 4. **Build the package** from a clean checkout of `main`:
 
    ```powershell
-   ./tools/package.ps1           # artifacts\RogehaReader_1.0.<build>.0_x64.msix, unsigned: the Store signs it
+   ./tools/package.ps1           # artifacts\RogehaReader_<major>.<minor>.<build>.0_x64.msix, unsigned: the Store signs it
    ./tools/package.ps1 -Sign     # "Rogeha Reader (test)", signed with the test certificate, to try it first
    ```
 
@@ -35,7 +35,8 @@ Partner Center, with a package from `tools/package.ps1` (its version is always h
 | Version | Built from | Status |
 | --- | --- | --- |
 | 1.0.36.0 | `c58d9a1` | First release: passed certification and published on 15 November 2026 |
-| 1.0.40.0 | `main` | Black out (redact). Built on 16 November 2026 for submission |
+| 1.0.40.0 | `e781031` | Black out (redact). Built on 16 November 2026 |
+| 1.1.x.0 | `main` | The same reader as 1.0.40 under the version number 1.1 (asked for on 16 November 2026). Not built yet |
 
 ## Checks before uploading
 
@@ -57,9 +58,9 @@ window) and Windows offers it for .pdf and .epub. Checks 2 to 8 have not been do
 
 | | |
 | --- | --- |
-| File | `artifacts/RogehaReader_1.0.<build>.0_x64.msix` (about 11 MB, unsigned; the Store signs it) |
+| File | `artifacts/RogehaReader_<major>.<minor>.<build>.0_x64.msix` (about 11 MB, unsigned; the Store signs it) |
 | Identity | `RogehaStudio.RogehaReader`, `CN=961E1179-772D-4F2C-9BC0-390262D24B36`, Rogeha Studio |
-| Version | 1.0.`<number of commits>`.0 (every later package must be higher, which the commit count gives) |
+| Version | `<major>.<minor>.<number of commits>.0`, now 1.1 (every later package must be higher, which the commit count gives) |
 | Contents | `rogeha-reader.exe` (the reader), `rogeha-agent.exe` (the assistant, started on request), the tile pictures, the licence |
 | Device family | Windows 10 version 1809 or later, desktop, x64 |
 | Depends on | `Microsoft.VCLibs.140.00.UWPDesktop` (the Visual C++ runtime; the Store installs it with the app) |

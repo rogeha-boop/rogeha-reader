@@ -3,7 +3,7 @@
 How the reader is built and why. This document describes the code as it is; keep it true with every
 build (see "Keeping this document current" at the end).
 
-Last updated for version 1.0.41 (16 November 2026).
+Last updated for version 1.1.43 (16 November 2026).
 
 ## In one paragraph
 
@@ -243,6 +243,9 @@ Windows does not let a program make itself the default viewer; both ways open th
 `MAJOR.MINOR.BUILD`. Major and minor come from `Cargo.toml`. The build number is the number of commits
 in the repository, worked out by `crates/app/build.rs`, so every committed change has a higher number.
 About shows it with the commit's short id.
+
+The reader was 1.0 up to build 42 and is 1.1 from build 43 (16 November 2026). The build number keeps
+counting across minor versions, so 1.1 starts at 1.1.43, not 1.1.0.
 
 ## Checking it
 

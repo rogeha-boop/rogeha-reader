@@ -6,7 +6,7 @@ and checks by hand is kept by people: change it when such a check is done or a k
 
 | | |
 | --- | --- |
-| Version tested | 1.0.40 (commit `e781031`, plus changes not yet committed) |
+| Version tested | 1.1.42 (commit `21fd130`, plus changes not yet committed) |
 | Date | 16 November 2026 |
 | Command | `cargo test --release` |
 | Result | **All 54 automated tests passed** |
@@ -126,6 +126,7 @@ each line says which build it was done on.
 | Store screenshot 8 retaken on a 100 % screen with `--size 2880x1620 --zoom 2` | Compared by eye with the old one, taken at 200 % | 1.0.36 | Same size (2880 x 1620) and layout; only the link and the version differ |
 | Black out: a made-up two-page bank statement; the payments marked with one box on every page and the account number by text, then saved as a copy | Script steps `redact`, `redactevery`, `redactbox`, `redactfind`, `redactsave`; both pictures looked at; the copy's text read with PyMuPDF | 1.0.38 | Payments, amounts and account number gone from the copy's text on both pages; name, address and dates kept; no annotations left; original unchanged |
 | Black out on a scan without text: the same statement as one JPEG picture per page, payments and account number boxed | Script steps; the pictures inside the copy read with PyMuPDF and compared with the original's | 1.0.38 | In the copy the boxed parts of each picture are blank, the address in the same picture is kept, and a black box is drawn over them |
+| Version number 1.1 | `rogeha-reader.exe --version` from the build | 1.1.43 | Shows 1.1 with the build number (1.1.42 plus the uncommitted change before the commit) |
 
 ## Measurements
 
