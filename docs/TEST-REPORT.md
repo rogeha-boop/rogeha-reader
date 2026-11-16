@@ -125,6 +125,7 @@ each line says which build it was done on.
 | The About box without its Feature overview link (the toolbar button stays) | Script step `about`, picture looked at | 1.0.35 | Only "Source code" and "Legal notice" left in that row |
 | Store screenshot 8 retaken on a 100 % screen with `--size 2880x1620 --zoom 2` | Compared by eye with the old one, taken at 200 % | 1.0.36 | Same size (2880 x 1620) and layout; only the link and the version differ |
 | Black out: a made-up two-page bank statement; the payments marked with one box on every page and the account number by text, then saved as a copy | Script steps `redact`, `redactevery`, `redactbox`, `redactfind`, `redactsave`; both pictures looked at; the copy's text read with PyMuPDF | 1.0.38 | Payments, amounts and account number gone from the copy's text on both pages; name, address and dates kept; no annotations left; original unchanged |
+| Black out on a scan without text: the same statement as one JPEG picture per page, payments and account number boxed | Script steps; the pictures inside the copy read with PyMuPDF and compared with the original's | 1.0.38 | In the copy the boxed parts of each picture are blank, the address in the same picture is kept, and a black box is drawn over them |
 
 ## Measurements
 
@@ -147,7 +148,7 @@ Things no test covers and nobody has tried by hand. Each is a risk until someone
 - The assistant and translation against a live AI service (only against a local stand-in).
 - Working with the mouse: selecting text, clicking links, dragging thumbnails, drawing a signature.
 - Ctrl+Tab between tabs.
-- The Black out window with the mouse (dragging boxes, clicking one away), and on a real bank statement or a scanned one.
+- The Black out window with the mouse (dragging boxes, clicking one away), and on a real bank statement or a real scan.
 - Scrolling by hand since pages are kept packed (a stutter when a page scrolls into view would show here).
 - The Compress window by hand, including its new messages.
 - Text recognition (OCR) from the Store package.
