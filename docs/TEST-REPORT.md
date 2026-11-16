@@ -6,7 +6,7 @@ and checks by hand is kept by people: change it when such a check is done or a k
 
 | | |
 | --- | --- |
-| Version tested | 1.0.37 (commit `f1b6b16`, plus changes not yet committed) |
+| Version tested | 1.0.40 (commit `e781031`, plus changes not yet committed) |
 | Date | 16 November 2026 |
 | Command | `cargo test --release` |
 | Result | **All 54 automated tests passed** |

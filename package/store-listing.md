@@ -47,7 +47,8 @@ Partner Center, with a package from `tools/package.ps1` (its version is always h
 6. The Feature overview button (four squares, beside About) opens the website page in the browser.
 7. Tools > Make Rogeha Reader the default PDF viewer opens Settings > Default apps on the app's entry.
 8. Print one page to a real printer.
-9. Remove the test app again (Settings > Apps > Installed apps).
+9. Tools > Black out (redact): drag a box on a copy of a statement, save the copy, open it: the boxed text cannot be found with Find.
+10. Remove the test app again (Settings > Apps > Installed apps).
 
 Checked so far, on 14 November 2026 with the test package 1.0.26.0: it installs, starts (19 MB with an empty
 window) and Windows offers it for .pdf and .epub. Checks 2 to 8 have not been done by hand.

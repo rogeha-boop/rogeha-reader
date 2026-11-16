@@ -122,6 +122,12 @@ Done in the first version:
     text, place the saved signature, list and fill form fields. Translation of a page is one
     of the quick actions. API keys go to the OS credential store. Verified against local
     mock servers (`crates/agent/tests`); no live provider was called during development.
+12. **Black out (redact)** (Tools menu, 1.0.38): for a document sent as proof of something,
+    such as a bank statement as proof of address. Boxes are marked by dragging, by a text
+    wherever it appears, or once for every page; the copy is written with MuPDF's redaction
+    applied, so text, picture dots and drawings under the boxes are removed (on scans too), and
+    comments, links and fields over them go as well. The original file is never changed.
+    Tested on generated PDFs, a made-up statement and a picture-only scan of it.
 
 Planned, in this order:
 
